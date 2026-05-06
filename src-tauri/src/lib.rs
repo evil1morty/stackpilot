@@ -5,6 +5,7 @@ mod state;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
+use commands::scoop_ops::{scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall};
 use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -18,6 +19,10 @@ pub fn run() {
             catalog_stats,
             catalog_refresh,
             scoop_check,
+            scoop_install,
+            scoop_uninstall,
+            scoop_bootstrap,
+            scoop_cancel,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

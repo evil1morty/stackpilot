@@ -35,3 +35,11 @@ export type ScoopStatus = {
   root: string | null;
   buckets: string[];
 };
+
+export type ScoopEvent =
+  | { type: "started"; payload: { command: string } }
+  | { type: "stdout"; payload: { line: string } }
+  | { type: "stderr"; payload: { line: string } }
+  | { type: "finished"; payload: { exitCode: number } }
+  | { type: "error"; payload: { message: string } };
+

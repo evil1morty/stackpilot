@@ -26,4 +26,5 @@ walkdir = "2"
 anyhow = "1"
 parking_lot = "0.12"
 rayon = "1"
+tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt"] }
 
