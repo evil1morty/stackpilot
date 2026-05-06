@@ -29,7 +29,7 @@ pub enum ScoopEvent {
 // ──────────────────────────────────────────────── helpers ─────────────────
 
 /// Build a powershell.exe command targeting the user's scoop.ps1 entry point.
-fn scoop_powershell(scoop_args: &[&str]) -> Result<Command, String> {
+pub(crate) fn scoop_powershell(scoop_args: &[&str]) -> Result<Command, String> {
     let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
     let scoop_ps1 = root.join("apps").join("scoop").join("current").join("bin").join("scoop.ps1");
     if !scoop_ps1.exists() {
@@ -66,7 +66,7 @@ fn powershell_inline(script: &str) -> Command {
 /// Spawn a `Command`, wire stdout+stderr to a streaming `Channel`, and resolve
 /// once the child exits. Caller is responsible for any post-completion
 /// state mutation (cache refresh, etc.).
-async fn drive(
+pub(crate) async fn drive(
     mut cmd: Command,
     on_event: &Channel<ScoopEvent>,
     state: &State<'_, AppState>,
@@ -257,9 +257,14 @@ pub async fn scoop_bootstrap(
 
 /// Cancel the in-flight scoop operation, if any. Sends `taskkill /T /F /PID`
 /// so PowerShell + scoop subprocesses are killed too. Returns true if a
-/// process was cancelled.
+/// process was cancelled. Bumps cancellation_gen so multi-step orchestrations
+/// (preset apply) can detect that they should abort.
 #[tauri::command]
 pub async fn scoop_cancel(state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .cancellation_gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     let pid = { state.running_pid.lock().take() };
     let Some(pid) = pid else {
         return Ok(false);

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicU64;
 
 use parking_lot::Mutex;
 
@@ -15,4 +16,8 @@ pub struct AppState {
     /// Tracked services Stackpilot has spawned. Keyed by `KnownService::key`.
     /// Children are leaked on drop (taskkill is responsible for cleanup).
     pub tracked: Mutex<HashMap<String, TrackedChild>>,
+    /// Monotonic counter bumped by `scoop_cancel`. Multi-step orchestrators
+    /// (e.g. `presets_apply`) snapshot it before starting and check before
+    /// every step to detect that the user pressed Cancel.
+    pub cancellation_gen: AtomicU64,
 }

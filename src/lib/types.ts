@@ -68,3 +68,23 @@ export type ServiceInfo = {
   binPath: string | null;
 };
 
+export type PresetApp = {
+  scoopApp: string;
+  installed: boolean;
+};
+
+export type PresetService = {
+  key: string;
+  display: string;
+};
+
+export type PresetInfo = {
+  key: string;
+  name: string;
+  description: string;
+  apps: PresetApp[];
+  autoStart: PresetService[];
+  appsInstalled: number;
+  appsTotal: number;
+};
+

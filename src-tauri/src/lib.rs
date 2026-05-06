@@ -1,11 +1,13 @@
 mod catalog;
 mod commands;
 mod known_services;
+mod presets;
 mod scoop;
 mod state;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
+use commands::presets_ops::{presets_apply, presets_list};
 use commands::scoop_ops::{scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall};
 use commands::services::{
     services_list, services_open_data, services_restart, services_start, services_stop,
@@ -32,6 +34,8 @@ pub fn run() {
             services_stop,
             services_restart,
             services_open_data,
+            presets_list,
+            presets_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

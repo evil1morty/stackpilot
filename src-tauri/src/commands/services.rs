@@ -133,12 +133,14 @@ pub fn services_list(state: State<'_, AppState>) -> Vec<ServiceInfo> {
         .collect()
 }
 
-#[tauri::command]
-pub async fn services_start(
-    key: String,
-    state: State<'_, AppState>,
+/// Implementation of `services_start` that takes a borrowed `AppState`.
+/// Used by `services_start` (Tauri command) and by orchestrators like
+/// `presets_apply`.
+pub(crate) async fn services_start_inner(
+    key: &str,
+    state: &AppState,
 ) -> Result<ServiceInfo, String> {
-    let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
+    let svc = known_services::lookup(key).ok_or_else(|| format!("unknown service: {key}"))?;
     let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
     let bin = known_services::bin_path(svc, &root);
     if !bin.exists() {
@@ -196,7 +198,15 @@ pub async fn services_start(
         },
     );
 
-    Ok(build_info(svc, &state))
+    Ok(build_info_for(svc, state))
+}
+
+#[tauri::command]
+pub async fn services_start(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<ServiceInfo, String> {
+    services_start_inner(&key, &state).await
 }
 
 #[tauri::command]
@@ -279,6 +289,10 @@ pub fn services_open_data(
 }
 
 fn build_info(svc: &KnownService, state: &State<'_, AppState>) -> ServiceInfo {
+    build_info_for(svc, state)
+}
+
+fn build_info_for(svc: &KnownService, state: &AppState) -> ServiceInfo {
     let root = scoop_root();
     let bin = root.as_ref().map(|r| known_services::bin_path(svc, r));
     let installed = bin.as_ref().is_some_and(|p| p.exists());

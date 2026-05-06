@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppEntry,
   CatalogStats,
+  PresetInfo,
   ScoopEvent,
   ScoopStatus,
   ServiceInfo,
@@ -42,4 +43,8 @@ export const ipc = {
     invoke<ServiceInfo>("services_restart", { key }),
   servicesOpenData: (key: string) =>
     invoke<void>("services_open_data", { key }),
+
+  presetsList: () => invoke<PresetInfo[]>("presets_list"),
+  presetsApply: (key: string, onEvent: Channel<ScoopEvent>) =>
+    invoke<void>("presets_apply", { key, onEvent }),
 };

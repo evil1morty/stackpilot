@@ -1,7 +1,7 @@
 import { Channel, ipc } from "$lib/ipc";
 import type { ScoopEvent } from "$lib/types";
 
-export type OpKind = "install" | "uninstall" | "bootstrap";
+export type OpKind = "install" | "uninstall" | "bootstrap" | "preset";
 export type OpState = "running" | "finished" | "errored" | "cancelled";
 
 export type LogLine = {
@@ -41,6 +41,10 @@ class OperationStore {
     return this.run("bootstrap", "Scoop");
   }
 
+  async runPreset(key: string, label: string): Promise<void> {
+    return this.run("preset", label, key);
+  }
+
   async cancel(): Promise<void> {
     if (!this.busy) return;
     try {
@@ -63,7 +67,7 @@ class OperationStore {
     this.current = null;
   }
 
-  private async run(kind: OpKind, target: string): Promise<void> {
+  private async run(kind: OpKind, target: string, presetKey?: string): Promise<void> {
     if (this.busy) {
       throw new Error("Another scoop operation is already running");
     }
@@ -94,6 +98,10 @@ class OperationStore {
           break;
         case "bootstrap":
           await ipc.scoopBootstrap(channel);
+          break;
+        case "preset":
+          if (!presetKey) throw new Error("preset key required");
+          await ipc.presetsApply(presetKey, channel);
           break;
       }
     } catch (e) {
