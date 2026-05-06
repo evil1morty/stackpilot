@@ -180,6 +180,43 @@ pub(crate) async fn services_start_inner(
     let log = service_logs::prepare_for_spawn(svc.key)
         .map_err(|e| format!("failed to open log file for {}: {}", svc.display, e))?;
 
+    // Run a one-time init if needed (Postgres initdb, MySQL --initialize, …).
+    // Init output is captured into the same log file so the user can see it.
+    if let Some((init_bin, init_args)) = known_services::init_step(svc, &root) {
+        let init_log = service_logs::prepare_for_spawn(svc.key)
+            .map_err(|e| format!("failed to open log for init step: {e}"))?;
+
+        let mut init_cmd = Command::new(&init_bin);
+        init_cmd
+            .args(&init_args)
+            .current_dir(&cwd)
+            .stdout(Stdio::from(init_log.stdout))
+            .stderr(Stdio::from(init_log.stderr))
+            .stdin(Stdio::null());
+
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            init_cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let init_status = init_cmd.status().await.map_err(|e| {
+            format!(
+                "failed to run init step for {} ({}): {}",
+                svc.display,
+                init_bin.display(),
+                e
+            )
+        })?;
+        if !init_status.success() {
+            return Err(format!(
+                "{} initialization failed (exit {}). See its log for details.",
+                svc.display,
+                init_status.code().unwrap_or(-1)
+            ));
+        }
+    }
+
     let mut cmd = Command::new(&bin);
     cmd.args(&args)
         .current_dir(&cwd)

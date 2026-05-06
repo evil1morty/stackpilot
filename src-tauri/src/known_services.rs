@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)] // reserved for future service additions
 pub enum Category {
@@ -160,6 +161,70 @@ pub fn launch_args(svc: &KnownService, scoop_root: &Path) -> Vec<String> {
     }
 }
 
+/// A service that needs a one-time initialization step (initdb, mysql
+/// --initialize, …) returns Some((bin, args)) when its data dir is empty.
+/// Returning None means "ready to start as-is."
+pub fn init_step(svc: &KnownService, scoop_root: &Path) -> Option<(PathBuf, Vec<String>)> {
+    let install = scoop_root.join("apps").join(svc.scoop_app).join("current");
+    let persist = scoop_root.join("persist").join(svc.scoop_app);
+    match svc.key {
+        "postgresql" => {
+            let data = persist.join("data");
+            // initdb writes PG_VERSION when complete; missing = uninitialized.
+            if data.join("PG_VERSION").exists() {
+                return None;
+            }
+            let bin = install.join("bin").join("initdb.exe");
+            let args = vec![
+                "-D".into(),
+                data.display().to_string(),
+                "-U".into(),
+                "postgres".into(),
+                "-E".into(),
+                "UTF8".into(),
+                "--locale=C".into(),
+            ];
+            Some((bin, args))
+        }
+        "mysql" | "mariadb" => {
+            let data = persist.join("data");
+            // mysql writes auto.cnf; mariadb writes mysql/host_*.frm. Use a
+            // looser signal: any file inside data/ counts as initialized.
+            if has_any_file(&data) {
+                return None;
+            }
+            let bin_name = if svc.key == "mysql" { "mysqld.exe" } else { "mariadbd.exe" };
+            let bin = install.join("bin").join(bin_name);
+            let args = vec![
+                "--initialize-insecure".into(),
+                format!("--basedir={}", install.display()),
+                format!("--datadir={}", data.display()),
+            ];
+            Some((bin, args))
+        }
+        "mongodb" => {
+            // mongod creates its own data dir, but it must exist as a
+            // writable path. Treat "no dbpath dir" as a trivial init step
+            // (a single mkdir, surfaced through the same path so the user
+            // sees it in logs).
+            let data = persist.join("data");
+            if data.exists() {
+                return None;
+            }
+            let _ = std::fs::create_dir_all(&data);
+            None
+        }
+        _ => None,
+    }
+}
+
+fn has_any_file(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .ok()
+        .map(|mut rd| rd.next().is_some())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +251,41 @@ mod tests {
         let args = launch_args(svc, Path::new("C:\\fake\\scoop"));
         assert_eq!(args[0], "-D");
         assert!(args[1].ends_with("data"));
+    }
+
+    #[test]
+    fn init_step_for_postgres_when_data_dir_missing() {
+        let svc = lookup("postgresql").unwrap();
+        let tmp = std::env::temp_dir()
+            .join(format!("stackpilot-init-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let step = init_step(svc, &tmp);
+        assert!(step.is_some(), "expected initdb step for empty data dir");
+        let (bin, args) = step.unwrap();
+        assert!(bin.to_string_lossy().ends_with("initdb.exe"));
+        assert!(args.contains(&"-U".to_string()));
+        assert!(args.contains(&"postgres".to_string()));
+    }
+
+    #[test]
+    fn init_step_returns_none_for_initialized_postgres() {
+        let svc = lookup("postgresql").unwrap();
+        let tmp = std::env::temp_dir()
+            .join(format!("stackpilot-init-test2-{}", std::process::id()));
+        let data = tmp.join("persist").join("postgresql").join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("PG_VERSION"), "16").unwrap();
+
+        let step = init_step(svc, &tmp);
+        assert!(step.is_none(), "PG_VERSION present should skip init");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn init_step_for_redis_is_none() {
+        let svc = lookup("redis").unwrap();
+        let step = init_step(svc, Path::new("C:\\fake\\scoop"));
+        assert!(step.is_none(), "redis needs no init");
     }
 }
