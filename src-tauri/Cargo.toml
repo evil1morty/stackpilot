@@ -29,4 +29,5 @@ rayon = "1"
 tokio = { version = "1", features = ["process", "io-util", "sync", "macros", "rt", "time"] }
 listeners = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dirs = "5"
 

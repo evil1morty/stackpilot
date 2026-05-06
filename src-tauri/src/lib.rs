@@ -1,6 +1,7 @@
 mod catalog;
 mod commands;
 mod known_services;
+mod persistence;
 mod presets;
 mod scoop;
 mod scoopsearch;
@@ -21,7 +22,7 @@ use state::AppState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState::default())
+        .manage(AppState::load_from_disk())
         .invoke_handler(tauri::generate_handler![
             ping,
             catalog_list,

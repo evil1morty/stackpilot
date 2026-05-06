@@ -1,6 +1,9 @@
 //! Service control: start / stop / restart / open data folder for the curated
-//! `KNOWN` services. Spawned children are tracked in `AppState.tracked`.
-//! Status combines tracked-child liveness with port-binding probes.
+//! `KNOWN` services. Spawned services are tracked in `AppState.tracked`
+//! (PID + port + start time) and mirrored to disk so a relaunch after a
+//! crash can re-attach. We deliberately do not retain the
+//! `tokio::process::Child` handle — liveness is probed by checking that the
+//! recorded PID still owns the recorded port.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -12,7 +15,7 @@ use tokio::process::Command;
 
 use crate::known_services::{self, KnownService};
 use crate::scoop::scoop_root;
-use crate::state::AppState;
+use crate::state::{AppState, TrackedService};
 
 // ─────────────────────────────────────────────── public DTOs ──────────────
 
@@ -56,7 +59,7 @@ fn pid_on_port(port: u16) -> Option<u32> {
         .map(|p| p.pid)
 }
 
-fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedChild>) -> ServiceStatus {
+fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedService>) -> ServiceStatus {
     if let Some(t) = tracked.get(svc.key) {
         return ServiceStatus::RunningTracked {
             pid: t.pid,
@@ -71,27 +74,24 @@ fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedChild>) -
     ServiceStatus::Stopped
 }
 
-// ─────────────────────────────────────────────── tracked-child store ──────
-
-pub struct TrackedChild {
-    pub child: tokio::process::Child,
-    pub pid: u32,
-    pub started_at: u64,
-}
-
-/// Walk the tracked map and remove anything whose process has already exited.
-fn sweep_dead(tracked: &mut HashMap<String, TrackedChild>) {
+/// Drop tracked entries whose recorded PID no longer owns the recorded port.
+/// Returns true if anything was removed (caller should persist).
+fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
     let mut dead: Vec<String> = Vec::new();
-    for (k, t) in tracked.iter_mut() {
-        match t.child.try_wait() {
-            Ok(Some(_)) => dead.push(k.clone()),
-            Ok(None) => {}
-            Err(_) => dead.push(k.clone()),
+    for (k, t) in tracked.iter() {
+        let alive = match t.port {
+            Some(port) => pid_on_port(port) == Some(t.pid),
+            None => false,
+        };
+        if !alive {
+            dead.push(k.clone());
         }
     }
+    let changed = !dead.is_empty();
     for k in dead {
         tracked.remove(&k);
     }
+    changed
 }
 
 fn unix_now() -> u64 {
@@ -107,7 +107,12 @@ fn unix_now() -> u64 {
 pub fn services_list(state: State<'_, AppState>) -> Vec<ServiceInfo> {
     let root = scoop_root();
     let mut tracked = state.tracked.lock();
-    sweep_dead(&mut tracked);
+    let changed = sweep_dead(&mut tracked);
+    drop(tracked);
+    if changed {
+        state.persist_tracked();
+    }
+    let tracked = state.tracked.lock();
 
     known_services::KNOWN
         .iter()
@@ -189,14 +194,21 @@ pub(crate) async fn services_start_inner(
         .id()
         .ok_or_else(|| "spawned child has no PID".to_string())?;
 
+    // We don't keep the Child handle: it's not needed for stop (taskkill /T
+    // /F by PID does the right thing) and would prevent us from re-attaching
+    // to the same service after a Stackpilot relaunch. Drop forgets the
+    // handle without killing the process.
+    drop(child);
+
     state.tracked.lock().insert(
         svc.key.to_string(),
-        TrackedChild {
-            child,
+        TrackedService {
             pid,
+            port: svc.default_port,
             started_at: unix_now(),
         },
     );
+    state.persist_tracked();
 
     Ok(build_info_for(svc, state))
 }
@@ -222,13 +234,14 @@ pub async fn services_stop(
         if let Some(t) = tracked.remove(svc.key) {
             Some(t.pid)
         } else if let Some(port) = svc.default_port {
-            // Stop external process listening on our port — covers app-relaunch
-            // scenarios where we lost track of a previously-spawned process.
+            // Stop external process listening on our port — covers cases
+            // where the user started it outside Stackpilot.
             pid_on_port(port)
         } else {
             None
         }
     };
+    state.persist_tracked();
 
     let pid = match pid_to_kill {
         Some(p) => p,
