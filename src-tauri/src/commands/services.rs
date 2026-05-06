@@ -416,6 +416,8 @@ pub struct ConfigFileInfo {
     pub language: String,
     pub exists: bool,
     pub size_bytes: u64,
+    /// File is in the install dir and will be clobbered by `scoop update`.
+    pub volatile: bool,
 }
 
 #[tauri::command]
@@ -438,9 +440,27 @@ pub fn services_config_files(key: String) -> Result<Vec<ConfigFileInfo>, String>
             language: cf.language.to_string(),
             exists,
             size_bytes,
+            volatile: cf.volatile,
         });
     }
     Ok(out)
+}
+
+/// Open a path with the system's default app (notepad for .conf/.log on
+/// Windows by default, or whatever the user has registered). Used by the
+/// "Open in editor" / "Open log" buttons.
+#[tauri::command]
+pub fn services_open_path(
+    path: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err(format!("file does not exist: {path}"));
+    }
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -466,23 +486,29 @@ pub fn services_config_write(path: String, content: String) -> Result<(), String
 /// Defense-in-depth for the config-write path. The frontend only writes to
 /// paths returned by services_config_files, but reject anything that isn't
 /// inside a Scoop-managed directory just in case.
+///
+/// We deliberately do NOT use `Path::canonicalize()` here: on Windows it
+/// returns the `\\?\` extended-length form for paths that exist, but
+/// silently fails (returning the original) for missing files. The two
+/// halves of the comparison would then disagree purely because of the
+/// `\\?\` prefix. Compare normalized lowercase strings instead.
 fn validate_config_path(path: &str) -> Result<(), String> {
     let Some(root) = scoop_root() else {
         return Err("Scoop is not installed".into());
     };
-    let normalized = std::path::PathBuf::from(path);
-    let canonical = normalized
-        .canonicalize()
-        .or_else(|_| Ok::<_, std::io::Error>(normalized.clone()))
-        .map_err(|e: std::io::Error| e.to_string())?;
-    let root_canonical = root
-        .canonicalize()
-        .unwrap_or(root.clone());
-    if !canonical.starts_with(&root_canonical) {
-        return Err(format!(
-            "refusing to touch path outside Scoop root: {}",
-            canonical.display()
-        ));
+    let path_norm = path.to_ascii_lowercase().replace('\\', "/");
+    let root_norm = root
+        .to_string_lossy()
+        .to_ascii_lowercase()
+        .replace('\\', "/");
+    if !path_norm.starts_with(&root_norm) {
+        return Err(format!("refusing to touch path outside Scoop root: {path}"));
+    }
+    if path_norm.contains("/../")
+        || path_norm.starts_with("../")
+        || path_norm.ends_with("/..")
+    {
+        return Err(format!("path contains parent traversal: {path}"));
     }
     Ok(())
 }

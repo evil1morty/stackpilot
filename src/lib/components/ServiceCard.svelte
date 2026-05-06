@@ -98,6 +98,15 @@
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
+
+  async function openLogFile() {
+    if (!logs?.path) return;
+    try {
+      await ipc.servicesOpenPath(logs.path);
+    } catch (e) {
+      logsErr = e instanceof Error ? e.message : String(e);
+    }
+  }
 </script>
 
 <article class="card" class:running={isRunning}>
@@ -207,6 +216,11 @@
             …
           {/if}
         </span>
+        {#if logs && logs.sizeBytes > 0}
+          <button class="open-log-btn" onclick={openLogFile} title="Open in default editor">
+            ↗ Open
+          </button>
+        {/if}
       </div>
       <div class="log-body" bind:this={logEl}>
         {#if logsErr}
@@ -438,6 +452,22 @@
     font-size: 10.5px;
     color: var(--text-muted);
     font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    flex: 1;
+  }
+
+  .open-log-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+    cursor: pointer;
+  }
+
+  .open-log-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
   }
 
   .log-body {

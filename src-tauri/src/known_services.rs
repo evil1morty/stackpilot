@@ -308,25 +308,35 @@ fn has_any_file(dir: &Path) -> bool {
 }
 
 /// Editable config files Stackpilot knows about for a given service.
-/// Resolved against `<scoop_root>/persist/<app>/` and the install dir.
-/// Filter to those that actually exist before showing them in the UI.
+/// Paths are resolved per the Scoop manifest's actual `persist` field
+/// (verified against the live bucket — see commit msg for the source).
+/// Configs in install dirs are flagged so the UI can warn the user that
+/// they'll get overwritten on `scoop update`.
 pub fn config_files(svc: &KnownService, scoop_root: &Path) -> Vec<ConfigFile> {
     let install = scoop_root.join("apps").join(svc.scoop_app).join("current");
     let persist = scoop_root.join("persist").join(svc.scoop_app);
     match svc.key {
+        // Redis ships configs in its install dir (no persist field). Edits
+        // here survive until `scoop update redis`.
         "redis" => vec![
-            ConfigFile::new(persist.join("redis.windows.conf"), "Redis", "ini"),
-            ConfigFile::new(persist.join("redis.conf"), "Redis", "ini"),
-            ConfigFile::new(install.join("redis.windows.conf"), "Redis (default)", "ini"),
+            ConfigFile::new(install.join("redis.conf"), "Redis", "ini").volatile(),
+            ConfigFile::new(install.join("redis-full.conf"), "Redis (annotated)", "ini")
+                .volatile(),
+            ConfigFile::new(install.join("sentinel.conf"), "Sentinel", "ini").volatile(),
         ],
+        // postgres persists `data/`, configs are written by initdb.
         "postgresql" => vec![
             ConfigFile::new(persist.join("data").join("postgresql.conf"), "PostgreSQL", "ini"),
             ConfigFile::new(persist.join("data").join("pg_hba.conf"), "Auth (pg_hba)", "conf"),
             ConfigFile::new(persist.join("data").join("pg_ident.conf"), "Ident", "conf"),
         ],
+        // mysql persists `my.ini` directly at the persist root.
         "mysql" | "mariadb" => vec![
-            ConfigFile::new(install.join("my.ini"), "Server config", "ini"),
-            ConfigFile::new(persist.join("my.cnf"), "User config", "ini"),
+            ConfigFile::new(persist.join("my.ini"), "Server", "ini"),
+        ],
+        // mongodb persists `bin/mongod.cfg` (verified from manifest).
+        "mongodb" => vec![
+            ConfigFile::new(persist.join("bin").join("mongod.cfg"), "mongod", "yaml"),
         ],
         "nginx" => vec![
             ConfigFile::new(persist.join("conf").join("nginx.conf"), "Nginx", "nginx"),
@@ -334,10 +344,23 @@ pub fn config_files(svc: &KnownService, scoop_root: &Path) -> Vec<ConfigFile> {
         ],
         "apache" => vec![
             ConfigFile::new(persist.join("conf").join("httpd.conf"), "httpd", "apache"),
-            ConfigFile::new(persist.join("conf").join("extra").join("httpd-vhosts.conf"), "Vhosts", "apache"),
+            ConfigFile::new(
+                persist.join("conf").join("extra").join("httpd-vhosts.conf"),
+                "Vhosts",
+                "apache",
+            ),
         ],
-        "caddy" => vec![ConfigFile::new(persist.join("Caddyfile"), "Caddyfile", "caddy")],
-        "mosquitto" => vec![ConfigFile::new(persist.join("mosquitto.conf"), "Broker config", "ini")],
+        // caddy has no persist field — Caddyfile lives wherever the user
+        // creates it. Default to install dir so users have something to
+        // start from. v0.3 will let them point the service at any path.
+        "caddy" => vec![
+            ConfigFile::new(install.join("Caddyfile"), "Caddyfile", "caddy").volatile()
+        ],
+        "mosquitto" => vec![ConfigFile::new(
+            persist.join("mosquitto.conf"),
+            "Broker config",
+            "ini",
+        )],
         _ => vec![],
     }
 }
@@ -348,6 +371,9 @@ pub struct ConfigFile {
     pub path: PathBuf,
     pub label: &'static str,
     pub language: &'static str,
+    /// True when the file lives under the Scoop install dir (gets
+    /// overwritten on `scoop update <app>`). The UI shows a warning.
+    pub volatile: bool,
 }
 
 impl ConfigFile {
@@ -356,7 +382,13 @@ impl ConfigFile {
             path,
             label,
             language,
+            volatile: false,
         }
+    }
+
+    fn volatile(mut self) -> Self {
+        self.volatile = true;
+        self
     }
 }
 

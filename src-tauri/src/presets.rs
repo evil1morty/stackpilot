@@ -2,14 +2,20 @@
 //! real-world dev stacks (Laravel Sail, Django/Rails backends, Mastodon,
 //! Supabase, MERN, classic LAMP). Apps must reference a Scoop manifest
 //! (any bucket) and `auto_start` keys must match `known_services::KNOWN`.
+//!
+//! Apps in `apps[]` that are NOT in `auto_start[]` are install-only — used
+//! for language runtimes and CLI tools (php, composer, nodejs, python,
+//! ruby). Scoop's nodejs ships npm; python ships pip; composer is a
+//! separate package.
 
 pub struct Preset {
     pub key: &'static str,
     pub name: &'static str,
     pub description: &'static str,
-    /// Scoop apps to install (resolved without bucket prefix).
+    /// Scoop apps to install (services + language runtimes + tools).
     pub apps: &'static [&'static str],
-    /// Known-service keys to start once installs complete.
+    /// Subset of `apps` that should be started as long-running services
+    /// once installs complete.
     pub auto_start: &'static [&'static str],
 }
 
@@ -17,43 +23,57 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         key: "lamp-classic",
         name: "LAMP Classic",
-        description: "Apache + MySQL + Redis. The PHP/WordPress/Drupal default since 2003.",
-        apps: &["apache", "mysql", "redis"],
+        description:
+            "Apache + MySQL + Redis with PHP & Composer. The PHP/WordPress/Drupal default since 2003.",
+        apps: &["apache", "mysql", "redis", "php", "composer"],
         auto_start: &["apache", "mysql", "redis"],
     },
     Preset {
         key: "lemp",
         name: "LEMP",
-        description: "Nginx + MariaDB + Redis. Modern PHP stack with the faster web server.",
-        apps: &["nginx", "mariadb", "redis"],
+        description:
+            "Nginx + MariaDB + Redis with PHP & Composer. Modern PHP stack with the faster web server.",
+        apps: &["nginx", "mariadb", "redis", "php", "composer"],
         auto_start: &["nginx", "mariadb", "redis"],
     },
     Preset {
         key: "laravel-sail",
         name: "Laravel Sail",
-        description: "Nginx + MySQL + Redis + Meilisearch — Laravel's official dev stack with Scout search.",
-        apps: &["nginx", "mysql", "redis", "meilisearch"],
+        description:
+            "Nginx + MySQL + Redis + Meilisearch with PHP, Composer & Node — Laravel's official dev stack with Scout search and asset pipeline.",
+        apps: &["nginx", "mysql", "redis", "meilisearch", "php", "composer", "nodejs"],
         auto_start: &["nginx", "mysql", "redis", "meilisearch"],
     },
     Preset {
-        key: "django-rails",
-        name: "Django / Rails",
-        description: "Nginx + PostgreSQL + Redis. The default backend stack for Django, Rails, Phoenix.",
-        apps: &["nginx", "postgresql", "redis"],
+        key: "django",
+        name: "Django",
+        description:
+            "Nginx + Postgres + Redis with Python (and pip). The default Django/FastAPI backend.",
+        apps: &["nginx", "postgresql", "redis", "python"],
+        auto_start: &["nginx", "postgresql", "redis"],
+    },
+    Preset {
+        key: "rails",
+        name: "Rails",
+        description:
+            "Nginx + Postgres + Redis with Ruby & Node. Rails's go-to dev stack with importmap/asset pipeline support.",
+        apps: &["nginx", "postgresql", "redis", "ruby", "nodejs"],
         auto_start: &["nginx", "postgresql", "redis"],
     },
     Preset {
         key: "mern",
         name: "MERN",
-        description: "Nginx + MongoDB + Redis. Mongo, Express, React, Node — minus the JS code.",
-        apps: &["nginx", "mongodb", "redis"],
+        description:
+            "Nginx + MongoDB + Redis with Node (npm bundled). Mongo, Express, React, Node.",
+        apps: &["nginx", "mongodb", "redis", "nodejs"],
         auto_start: &["nginx", "mongodb", "redis"],
     },
     Preset {
         key: "mastodon-lite",
         name: "Mastodon Lite",
-        description: "Postgres + Redis + Meilisearch. Search-heavy social — same shape as Mastodon, Discourse, Lemmy.",
-        apps: &["postgresql", "redis", "meilisearch"],
+        description:
+            "Postgres + Redis + Meilisearch with Ruby & Node. Same shape as Mastodon, Discourse, Lemmy.",
+        apps: &["postgresql", "redis", "meilisearch", "ruby", "nodejs"],
         auto_start: &["postgresql", "redis", "meilisearch"],
     },
     Preset {
@@ -66,28 +86,30 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         key: "caddy-lab",
         name: "Caddy Lab",
-        description: "Caddy + PostgreSQL + Redis. Modern, low-config, auto-HTTPS web stack.",
+        description: "Caddy + Postgres + Redis. Modern, low-config web stack with auto-HTTPS.",
         apps: &["caddy", "postgresql", "redis"],
         auto_start: &["caddy", "postgresql", "redis"],
     },
     Preset {
         key: "iot-edge",
         name: "IoT Edge",
-        description: "Mosquitto MQTT + Postgres. Telemetry broker plus storage for time-series data.",
-        apps: &["mosquitto", "postgresql"],
+        description:
+            "Mosquitto MQTT + Postgres with Python (paho-mqtt + psycopg2). Telemetry broker plus storage.",
+        apps: &["mosquitto", "postgresql", "python"],
         auto_start: &["mosquitto", "postgresql"],
     },
     Preset {
         key: "wordpress",
         name: "WordPress",
-        description: "Apache + MySQL + Memcached. Object-cache-tuned WP host that doesn't need Redis.",
-        apps: &["apache", "mysql", "memcached"],
+        description:
+            "Apache + MySQL + Memcached with PHP & Composer. Object-cache-tuned WP host that doesn't need Redis.",
+        apps: &["apache", "mysql", "memcached", "php", "composer"],
         auto_start: &["apache", "mysql", "memcached"],
     },
     Preset {
         key: "cache-only",
         name: "Cache Only",
-        description: "Just Redis. For the times you only need a quick local key-value store.",
+        description: "Just Redis. For when you only need a quick local key-value store.",
         apps: &["redis"],
         auto_start: &["redis"],
     },

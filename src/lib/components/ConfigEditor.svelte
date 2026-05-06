@@ -21,9 +21,12 @@
   let saving = $state(false);
   let restartAfterSave = $state(true);
   let saveResult = $state<string | null>(null);
+  let showMissing = $state(false);
 
   const dirty = $derived(content !== original);
   const activeFile = $derived(files.find((f) => f.path === activePath) ?? null);
+  const visibleFiles = $derived(showMissing ? files : files.filter((f) => f.exists));
+  const missingCount = $derived(files.filter((f) => !f.exists).length);
 
   onMount(async () => {
     try {
@@ -122,8 +125,12 @@
       <aside class="files">
         {#if files.length === 0}
           <p class="files-empty">No configurable files for this service.</p>
+        {:else if visibleFiles.length === 0}
+          <p class="files-empty">
+            No config files exist yet. Start the service once to populate them.
+          </p>
         {/if}
-        {#each files as f (f.path)}
+        {#each visibleFiles as f (f.path)}
           <button
             class="file-item"
             class:active={f.path === activePath}
@@ -131,7 +138,12 @@
             onclick={() => openFile(f.path)}
             title={f.path}
           >
-            <span class="file-label">{f.label}</span>
+            <span class="file-label">
+              {f.label}
+              {#if f.volatile}
+                <span class="vol-tag" title="In install dir — overwritten on `scoop update`">!</span>
+              {/if}
+            </span>
             <span class="file-meta">
               {#if f.exists}
                 {fmtSize(f.sizeBytes)}
@@ -141,6 +153,11 @@
             </span>
           </button>
         {/each}
+        {#if missingCount > 0}
+          <button class="missing-toggle" onclick={() => (showMissing = !showMissing)}>
+            {showMissing ? "Hide" : "Show"} {missingCount} missing
+          </button>
+        {/if}
       </aside>
 
       <main class="editor">
@@ -155,9 +172,19 @@
         {:else}
           <div class="editor-head">
             <code class="path">{activePath}</code>
+            {#if activeFile?.volatile}
+              <span class="warn-tag" title="Will be overwritten by `scoop update`">install dir</span>
+            {/if}
             {#if dirty}
               <span class="dirty-badge">unsaved</span>
             {/if}
+            <button
+              class="head-btn"
+              onclick={() => activePath && ipc.servicesOpenPath(activePath)}
+              title="Open in default editor (notepad, VS Code, …)"
+            >
+              ↗ Open in editor
+            </button>
           </div>
           <textarea
             bind:value={content}
@@ -323,6 +350,64 @@
 
   .file-label {
     font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .vol-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    background: var(--warning-soft);
+    color: var(--warning);
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+  }
+
+  .missing-toggle {
+    background: transparent;
+    border: 1px dashed var(--border-strong);
+    color: var(--text-muted);
+    padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 6px;
+  }
+
+  .missing-toggle:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
+
+  .head-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    border-radius: var(--radius-sm);
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .head-btn:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
+
+  .warn-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--warning);
+    background: var(--warning-soft);
+    padding: 2px 8px;
+    border-radius: 999px;
   }
 
   .file-meta {

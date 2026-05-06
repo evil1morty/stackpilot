@@ -94,6 +94,8 @@ export type ConfigFileInfo = {
   language: string;
   exists: boolean;
   sizeBytes: number;
+  /** File lives in the install dir and gets clobbered by `scoop update`. */
+  volatile: boolean;
 };
 
 export type Project = {

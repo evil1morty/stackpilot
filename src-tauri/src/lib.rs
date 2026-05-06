@@ -22,7 +22,8 @@ use commands::scoop_ops::{
 };
 use commands::services::{
     services_config_files, services_config_read, services_config_write, services_list,
-    services_open_data, services_restart, services_start, services_stop, services_tail_log,
+    services_open_data, services_open_path, services_restart, services_start, services_stop,
+    services_tail_log,
 };
 use state::AppState;
 
@@ -47,6 +48,7 @@ pub fn run() {
             services_stop,
             services_restart,
             services_open_data,
+            services_open_path,
             services_tail_log,
             services_config_files,
             services_config_read,

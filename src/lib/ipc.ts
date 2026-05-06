@@ -69,6 +69,8 @@ export const ipc = {
     invoke<string>("services_config_read", { path }),
   servicesConfigWrite: (path: string, content: string) =>
     invoke<void>("services_config_write", { path, content }),
+  servicesOpenPath: (path: string) =>
+    invoke<void>("services_open_path", { path }),
 
   presetsList: () => invoke<PresetInfo[]>("presets_list"),
   presetsApply: (key: string, onEvent: Channel<ScoopEvent>) =>
