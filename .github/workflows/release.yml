@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+  # Manual trigger from the Actions tab — produces uploaded artifacts
+  # without creating a Release.
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & draft release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo registry & build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Run unit tests
+        run: cd src-tauri && cargo test --lib
+
+      - name: Type-check frontend
+        run: bun run check
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event_name == 'push' && github.ref_name || '' }}
+          releaseName: "Stackpilot ${{ github.ref_name }}"
+          releaseBody: |
+            ## What's new
+
+            See [CHANGELOG](./CHANGELOG.md) for details.
+
+            ## Install
+
+            Download the `.msi` installer below and run it. Stackpilot is not
+            yet code-signed; SmartScreen may warn — choose **More info → Run
+            anyway** to install.
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: false

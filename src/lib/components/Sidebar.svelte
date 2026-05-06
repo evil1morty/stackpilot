@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import SettingsMenu from "./SettingsMenu.svelte";
 
   type NavItem = { href: string; label: string; icon: string };
 
@@ -36,6 +37,7 @@
 
   <div class="foot">
     <span class="foot-text">Scoop · Windows</span>
+    <SettingsMenu />
   </div>
 </aside>
 
@@ -148,6 +150,10 @@
     padding: 12px 10px 4px 10px;
     border-top: 1px solid var(--border);
     margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .foot-text {

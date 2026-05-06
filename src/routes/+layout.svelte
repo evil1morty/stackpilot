@@ -1,8 +1,14 @@
 <script lang="ts">
   import "../app.css";
+  import { onMount } from "svelte";
   import Sidebar from "$lib/components/Sidebar.svelte";
+  import { theme } from "$lib/stores/theme.svelte";
 
   let { children } = $props();
+
+  onMount(() => {
+    theme.init();
+  });
 </script>
 
 <div class="app">
