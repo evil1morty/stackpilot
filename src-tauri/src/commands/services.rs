@@ -529,6 +529,10 @@ pub fn services_tail_log(key: String, max_lines: Option<usize>) -> Result<Servic
     })
 }
 
+/// Open the most useful folder for a given service: the persist dir if it
+/// exists and has anything in it, otherwise the install dir (where Scoop
+/// services without `persist` keep their data — Redis writes RDB files
+/// next to the binary, Caddy ships its Caddyfile here, etc.).
 #[tauri::command]
 pub fn services_open_data(
     key: String,
@@ -538,18 +542,30 @@ pub fn services_open_data(
     let _ = state;
     let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
     let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
-    let dir = known_services::persist_dir(svc, &root)
-        .ok_or_else(|| format!("{} has no persist directory", svc.display))?;
 
-    if !dir.exists() {
+    let persist = known_services::persist_dir(svc, &root);
+    let install = root.join("apps").join(svc.scoop_app).join("current");
+
+    let target = persist
+        .filter(|p| {
+            // Use persist iff it exists AND has at least one entry.
+            p.is_dir()
+                && std::fs::read_dir(p)
+                    .map(|mut rd| rd.next().is_some())
+                    .unwrap_or(false)
+        })
+        .unwrap_or_else(|| install.clone());
+
+    if !target.exists() {
         return Err(format!(
-            "Persist directory {} does not exist yet. Start the service once to populate it.",
-            dir.display()
+            "{} install directory not found at {}.",
+            svc.display,
+            install.display()
         ));
     }
 
     app.opener()
-        .open_path(dir.display().to_string(), None::<&str>)
+        .open_path(target.display().to_string(), None::<&str>)
         .map_err(|e| e.to_string())
 }
 
