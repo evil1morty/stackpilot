@@ -96,6 +96,39 @@ export type ConfigFileInfo = {
   sizeBytes: number;
 };
 
+export type Project = {
+  key: string;
+  name: string;
+  rootDir: string;
+  services: string[];
+  envVars: Record<string, string>;
+  notes: string;
+  createdAt: number;
+  lastActiveAt: number | null;
+};
+
+export type ProjectInfo = Project & { isActive: boolean };
+
+export type ProjectInput = {
+  name: string;
+  rootDir?: string;
+  services?: string[];
+  envVars?: Record<string, string>;
+  notes?: string;
+};
+
+export type ServiceFailure = {
+  key: string;
+  error: string;
+};
+
+export type ActivationReport = {
+  stopped: string[];
+  started: string[];
+  failed: ServiceFailure[];
+  project: ProjectInfo;
+};
+
 export type PresetApp = {
   scoopApp: string;
   installed: boolean;

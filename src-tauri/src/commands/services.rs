@@ -210,10 +210,19 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
 
 /// Implementation of `services_start` that takes a borrowed `AppState`.
 /// Used by `services_start` (Tauri command) and by orchestrators like
-/// `presets_apply`.
+/// `presets_apply` and `projects_activate`. Optional `extra_env` is merged
+/// onto the parent process env when spawning (project env vars).
 pub(crate) async fn services_start_inner(
     key: &str,
     state: &AppState,
+) -> Result<ServiceInfo, String> {
+    services_start_with_env(key, state, &HashMap::new()).await
+}
+
+pub(crate) async fn services_start_with_env(
+    key: &str,
+    state: &AppState,
+    extra_env: &HashMap<String, String>,
 ) -> Result<ServiceInfo, String> {
     let svc = known_services::lookup(key).ok_or_else(|| format!("unknown service: {key}"))?;
     let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
@@ -289,6 +298,7 @@ pub(crate) async fn services_start_inner(
     let mut cmd = Command::new(&bin);
     cmd.args(&args)
         .current_dir(&cwd)
+        .envs(extra_env.iter())
         .stdout(Stdio::from(log.stdout))
         .stderr(Stdio::from(log.stderr))
         .stdin(Stdio::null());

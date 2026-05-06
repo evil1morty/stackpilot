@@ -4,6 +4,7 @@ mod health;
 mod known_services;
 mod persistence;
 mod presets;
+mod projects;
 mod scoop;
 mod scoopsearch;
 mod service_logs;
@@ -12,6 +13,10 @@ mod state;
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
 use commands::presets_ops::{presets_apply, presets_list};
+use commands::projects_ops::{
+    projects_activate, projects_create, projects_deactivate, projects_delete, projects_list,
+    projects_update,
+};
 use commands::scoop_ops::{
     scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall, scoop_update,
 };
@@ -48,6 +53,12 @@ pub fn run() {
             services_config_write,
             presets_list,
             presets_apply,
+            projects_list,
+            projects_create,
+            projects_update,
+            projects_delete,
+            projects_activate,
+            projects_deactivate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

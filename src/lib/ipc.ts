@@ -1,9 +1,12 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
+  ActivationReport,
   AppEntry,
   CatalogStats,
   ConfigFileInfo,
   PresetInfo,
+  ProjectInfo,
+  ProjectInput,
   ScoopEvent,
   ScoopStatus,
   ServiceInfo,
@@ -70,4 +73,16 @@ export const ipc = {
   presetsList: () => invoke<PresetInfo[]>("presets_list"),
   presetsApply: (key: string, onEvent: Channel<ScoopEvent>) =>
     invoke<void>("presets_apply", { key, onEvent }),
+
+  projectsList: () => invoke<ProjectInfo[]>("projects_list"),
+  projectsCreate: (input: ProjectInput) =>
+    invoke<ProjectInfo>("projects_create", { input }),
+  projectsUpdate: (key: string, input: ProjectInput) =>
+    invoke<ProjectInfo>("projects_update", { key, input }),
+  projectsDelete: (key: string) =>
+    invoke<void>("projects_delete", { key }),
+  projectsActivate: (key: string) =>
+    invoke<ActivationReport>("projects_activate", { key }),
+  projectsDeactivate: () =>
+    invoke<string[]>("projects_deactivate"),
 };

@@ -2,7 +2,7 @@
   import { page } from "$app/state";
   import SettingsMenu from "./SettingsMenu.svelte";
 
-  type IconName = "grid" | "activity" | "layers" | "terminal";
+  type IconName = "grid" | "activity" | "layers" | "folder" | "terminal";
 
   type NavItem = {
     href: string;
@@ -15,8 +15,9 @@
   const items: NavItem[] = [
     { href: "/", label: "Packages", icon: "grid", accel: 1 },
     { href: "/services", label: "Services", icon: "activity", accel: 2 },
-    { href: "/presets", label: "Presets", icon: "layers", accel: 3 },
-    { href: "/logs", label: "Logs", icon: "terminal", accel: 4 },
+    { href: "/projects", label: "Projects", icon: "folder", accel: 3 },
+    { href: "/presets", label: "Presets", icon: "layers", accel: 4 },
+    { href: "/logs", label: "Logs", icon: "terminal", accel: 5 },
   ];
 
   function isActive(href: string): boolean {
@@ -50,6 +51,11 @@
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          {:else if item.icon === "folder"}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
           {:else if item.icon === "layers"}
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"

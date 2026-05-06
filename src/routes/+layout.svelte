@@ -10,8 +10,9 @@
   const navByAccel: Record<string, string> = {
     "1": "/",
     "2": "/services",
-    "3": "/presets",
-    "4": "/logs",
+    "3": "/projects",
+    "4": "/presets",
+    "5": "/logs",
   };
 
   onMount(() => {
