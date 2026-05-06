@@ -17,6 +17,14 @@ export type AppEntry = {
   bins: string[];
   supportsArch: string[];
   installed: InstalledInfo | null;
+  /** ISO 8601 date of the last manifest commit (online results only). */
+  committed?: string;
+  /** Bucket repo URL — `https://github.com/ScoopInstaller/Main` etc. */
+  repository?: string;
+  /** GitHub stars on the bucket repo (online results only). */
+  repositoryStars?: number;
+  /** Search highlight fragments wrapped in `<mark>`, keyed by field. */
+  highlights?: Record<string, string[]>;
 };
 
 export type BucketSummary = {
@@ -36,7 +44,7 @@ export type ScoopStatus = {
   buckets: string[];
 };
 
-export type SortBy = "bestMatch" | "popular" | "name";
+export type SortBy = "bestMatch" | "popular" | "recent" | "name";
 
 export type ScoopEvent =
   | { type: "started"; payload: { command: string } }

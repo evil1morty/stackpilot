@@ -9,6 +9,7 @@
   const SORT_LABEL: Record<SortBy, string> = {
     bestMatch: "Best match",
     popular: "Popular",
+    recent: "Recently updated",
     name: "Name (A-Z)",
   };
 

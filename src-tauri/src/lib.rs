@@ -3,6 +3,7 @@ mod commands;
 mod known_services;
 mod presets;
 mod scoop;
+mod scoopsearch;
 mod state;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};

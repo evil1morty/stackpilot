@@ -28,6 +28,19 @@ pub struct AppEntry {
     pub bins: Vec<String>,
     pub supports_arch: Vec<String>,
     pub installed: Option<InstalledInfo>,
+    /// ISO 8601 date of the last manifest commit. Populated by online search;
+    /// `None` for results read off the local disk (we don't track mtime).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub committed: Option<String>,
+    /// Bucket repo URL (e.g. `https://github.com/ScoopInstaller/Main`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
+    /// GitHub stars on the bucket repo. Online-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_stars: Option<u32>,
+    /// Match highlight fragments keyed by field name (`<mark>` wrapped).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub highlights: std::collections::HashMap<String, Vec<String>>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -240,7 +253,18 @@ fn parse_manifest(
         bins,
         supports_arch,
         installed: installed.get(&stem.to_lowercase()).cloned(),
+        committed: None,
+        repository: None,
+        repository_stars: None,
+        highlights: HashMap::new(),
     })
+}
+
+/// Used by online search to enrich API results with installed-state probed
+/// fresh from disk (no full catalog walk).
+pub fn lookup_installed(name: &str) -> Option<InstalledInfo> {
+    let root = scoop_root()?;
+    installed_index(&root).remove(&name.to_lowercase())
 }
 
 /// Normalize a value that is either a string, an array of strings, or absent.
@@ -327,11 +351,11 @@ pub enum SortBy {
     /// with bucket priority as a tiebreaker. The default.
     #[default]
     BestMatch,
-    /// Heuristic-curated ordering: main-bucket apps first, then extras,
-    /// then community buckets. Within a bucket, apps with descriptions
-    /// and license metadata rank above bare manifests; alphabetical
-    /// tiebreaker. (Real popularity needs the scoopsearch index — v1.1.)
+    /// Curated ordering. Online: bucket repository stars desc. Offline:
+    /// bucket priority + metadata richness heuristic.
     Popular,
+    /// Most recently committed manifests first. Online-only signal.
+    Recent,
     /// Pure alphabetical, case-insensitive.
     Name,
 }
@@ -414,7 +438,9 @@ pub fn filter(
                 key_a.cmp(&key_b)
             });
         }
-        SortBy::BestMatch => {
+        SortBy::BestMatch | SortBy::Recent => {
+            // Recent has no offline signal (we don't store mtime), so it
+            // falls back to BestMatch ordering when invoked locally.
             hits.sort_by(|a, b| {
                 let rank_a = match_rank(a, q_ref);
                 let rank_b = match_rank(b, q_ref);
@@ -624,6 +650,10 @@ mod tests {
             bins: vec![],
             supports_arch: vec!["64bit".into()],
             installed: None,
+            committed: None,
+            repository: None,
+            repository_stars: None,
+            highlights: HashMap::new(),
         }
     }
 
