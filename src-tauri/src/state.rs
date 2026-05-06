@@ -1,5 +1,6 @@
-// AppState — runtime state shared across commands.
-// Populated in later phases (tracked PIDs for Services, log channels, etc.)
+use crate::catalog::CatalogCache;
 
 #[derive(Default)]
-pub struct AppState;
+pub struct AppState {
+    pub catalog: CatalogCache,
+}

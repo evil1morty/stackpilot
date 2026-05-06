@@ -3,6 +3,7 @@ use serde::Serialize;
 use crate::scoop::scoop_root;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PingResponse {
     pub ok: bool,
     pub message: String,

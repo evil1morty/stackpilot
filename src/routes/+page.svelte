@@ -1,117 +1,408 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { ipc, type PingResponse } from "$lib/ipc";
+  import { ipc } from "$lib/ipc";
+  import type { AppEntry, CatalogStats, ScoopStatus } from "$lib/types";
+  import AppCard from "$lib/components/AppCard.svelte";
+  import BootstrapModal from "$lib/components/BootstrapModal.svelte";
 
-  let pong = $state<PingResponse | null>(null);
-  let err = $state<string | null>(null);
+  let scoop = $state<ScoopStatus | null>(null);
+  let stats = $state<CatalogStats | null>(null);
+  let results = $state<AppEntry[]>([]);
+  let query = $state("");
+  let bucket = $state<string | null>(null);
+  let installedOnly = $state(false);
+  let loading = $state(true);
+  let refreshing = $state(false);
+  let error = $state<string | null>(null);
+
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(async () => {
-    try {
-      pong = await ipc.ping();
-    } catch (e) {
-      err = e instanceof Error ? e.message : String(e);
-    }
+    await refreshAll();
   });
+
+  async function refreshAll() {
+    loading = true;
+    error = null;
+    try {
+      const status = await ipc.scoopCheck();
+      scoop = status;
+      if (status.installed) {
+        stats = await ipc.catalogStats();
+        await fetchResults();
+      } else {
+        stats = null;
+        results = [];
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function fetchResults() {
+    try {
+      results = await ipc.catalogList(query, bucket ?? undefined, installedOnly);
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function debouncedFetch() {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(fetchResults, 180);
+  }
+
+  async function refreshCatalog() {
+    refreshing = true;
+    try {
+      stats = await ipc.catalogRefresh();
+      await fetchResults();
+    } finally {
+      refreshing = false;
+    }
+  }
+
+  function selectBucket(b: string | null) {
+    bucket = b;
+    fetchResults();
+  }
+
+  function toggleInstalled() {
+    installedOnly = !installedOnly;
+    fetchResults();
+  }
+
+  function clearQuery() {
+    query = "";
+    fetchResults();
+  }
 </script>
 
 <section class="page">
-  <header>
-    <h1>Catalog</h1>
-    <p class="lede">Browse Scoop manifests, install services, manage your stack.</p>
+  <header class="head">
+    <div>
+      <h1>Catalog</h1>
+      <p class="lede">
+        {#if stats}
+          {stats.total.toLocaleString()} apps
+          <span class="dot-sep">·</span>
+          {stats.installed} installed
+          <span class="dot-sep">·</span>
+          {stats.buckets.length} buckets
+        {:else if loading}
+          Loading…
+        {:else}
+          Browse Scoop manifests, install services, manage your stack.
+        {/if}
+      </p>
+    </div>
+    {#if scoop?.installed}
+      <button class="btn" onclick={refreshCatalog} disabled={refreshing} title="Re-scan buckets">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+        </svg>
+        {refreshing ? "Refreshing…" : "Refresh"}
+      </button>
+    {/if}
   </header>
 
-  <div class="placeholder">
-    <div class="placeholder-card">
-      <h2>Scoop status</h2>
-      {#if err}
-        <span class="badge badge-danger">IPC error</span>
-        <pre>{err}</pre>
-      {:else if pong}
-        {#if pong.scoop_root}
-          <span class="badge badge-success">Detected</span>
-          <p class="path">{pong.scoop_root}</p>
-        {:else}
-          <span class="badge badge-warning">Not installed</span>
-          <p class="hint">{pong.message}</p>
+  {#if error}
+    <div class="error-banner">
+      <strong>Error:</strong>
+      {error}
+    </div>
+  {/if}
+
+  {#if scoop?.installed && stats}
+    <div class="controls">
+      <div class="search">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+        <input
+          type="text"
+          placeholder="Search 1,500+ apps…"
+          bind:value={query}
+          oninput={debouncedFetch}
+        />
+        {#if query}
+          <button class="clear" onclick={clearQuery} aria-label="Clear search">×</button>
         {/if}
-      {:else}
-        <span class="badge">Checking…</span>
-      {/if}
+      </div>
+
+      <button
+        class="filter-pill"
+        class:active={installedOnly}
+        onclick={toggleInstalled}
+        title="Show only installed apps"
+      >
+        Installed only
+      </button>
     </div>
 
-    <p class="phase-note">Phase 0 scaffold — catalog UI lands in Phase 1.</p>
-  </div>
+    <div class="bucket-row">
+      <button
+        class="chip"
+        class:active={bucket == null}
+        onclick={() => selectBucket(null)}
+      >
+        All <span class="count">{stats.total}</span>
+      </button>
+      {#each stats.buckets as b (b.name)}
+        <button
+          class="chip"
+          class:active={bucket === b.name}
+          onclick={() => selectBucket(b.name)}
+        >
+          {b.name} <span class="count">{b.count}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="grid">
+      {#each results as app (app.bucket + "/" + app.name)}
+        <AppCard {app} />
+      {/each}
+    </div>
+
+    {#if results.length === 0 && !loading}
+      <div class="empty">
+        <p>No apps match.</p>
+      </div>
+    {/if}
+
+    {#if results.length === 300}
+      <p class="cap-hint">
+        Showing the first 300 results. Refine your search to narrow further.
+      </p>
+    {/if}
+  {/if}
+
+  {#if loading && !scoop}
+    <div class="loading-state"><div class="spinner"></div></div>
+  {/if}
 </section>
+
+{#if scoop && !scoop.installed}
+  <BootstrapModal
+    onResolved={(s) => {
+      scoop = s;
+      if (s.installed) refreshAll();
+    }}
+  />
+{/if}
 
 <style>
   .page {
-    padding: 32px 40px;
-    max-width: 1200px;
+    padding: 28px 36px 60px 36px;
+    max-width: 1400px;
   }
 
-  header {
-    margin-bottom: 32px;
+  .head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
   }
 
   h1 {
     font-size: 24px;
     font-weight: 600;
-    letter-spacing: -0.01em;
     margin: 0 0 4px 0;
-  }
-
-  h2 {
-    font-size: 13px;
-    font-weight: 500;
-    margin: 0 0 12px 0;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: -0.01em;
   }
 
   .lede {
     color: var(--text-dim);
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
   }
 
-  .placeholder {
+  .dot-sep {
+    color: var(--text-muted);
+    margin: 0 4px;
+  }
+
+  .error-banner {
+    background: var(--danger-soft);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  .controls {
     display: flex;
-    flex-direction: column;
-    gap: 16px;
+    gap: 8px;
+    margin-bottom: 12px;
   }
 
-  .placeholder-card {
+  .search {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     background: var(--bg-1);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 20px 24px;
-    max-width: 520px;
+    border-radius: var(--radius-sm);
+    padding: 0 10px;
+    transition: border-color 120ms ease, background 120ms ease;
   }
 
-  .path {
-    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  .search:focus-within {
+    border-color: var(--accent);
+    background: var(--bg-2);
+  }
+
+  .search svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .search input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 8px 0;
+  }
+
+  .search input:focus {
+    border: none;
+    background: transparent;
+  }
+
+  .clear {
+    color: var(--text-muted);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 4px;
+    border: none;
+    cursor: pointer;
+  }
+
+  .clear:hover {
+    color: var(--text);
+  }
+
+  .filter-pill {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0 14px;
+    color: var(--text-dim);
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 120ms ease;
+  }
+
+  .filter-pill:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
+
+  .filter-pill.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-soft);
+  }
+
+  .bucket-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 20px;
+  }
+
+  .chip {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
     font-size: 12px;
+    font-weight: 500;
     color: var(--text-dim);
-    margin: 12px 0 0 0;
+    cursor: pointer;
+    transition: all 120ms ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
 
-  .hint {
-    color: var(--text-dim);
+  .chip:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
+
+  .chip.active {
+    background: var(--accent);
+    color: var(--bg-0);
+    border-color: var(--accent);
+  }
+
+  .chip .count {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-2);
+    padding: 1px 6px;
+    border-radius: 999px;
+  }
+
+  .chip.active .count {
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 80px 0;
+    color: var(--text-muted);
     font-size: 13px;
-    margin: 12px 0 0 0;
   }
 
-  pre {
-    margin: 12px 0 0 0;
-    font-size: 12px;
-    color: var(--danger);
-    white-space: pre-wrap;
-  }
-
-  .phase-note {
+  .cap-hint {
+    text-align: center;
     color: var(--text-muted);
     font-size: 12px;
-    margin: 0;
+    margin: 24px 0 0 0;
+  }
+
+  .loading-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 50vh;
+  }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

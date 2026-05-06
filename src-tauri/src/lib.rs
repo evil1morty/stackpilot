@@ -1,7 +1,9 @@
+mod catalog;
 mod commands;
 mod scoop;
 mod state;
 
+use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
 use state::AppState;
 
@@ -10,7 +12,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::default())
-        .invoke_handler(tauri::generate_handler![ping])
+        .invoke_handler(tauri::generate_handler![
+            ping,
+            catalog_list,
+            catalog_stats,
+            catalog_refresh,
+            scoop_check,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
