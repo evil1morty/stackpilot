@@ -16,8 +16,8 @@ use commands::scoop_ops::{
     scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall, scoop_update,
 };
 use commands::services::{
-    services_list, services_open_data, services_restart, services_start, services_stop,
-    services_tail_log,
+    services_config_files, services_config_read, services_config_write, services_list,
+    services_open_data, services_restart, services_start, services_stop, services_tail_log,
 };
 use state::AppState;
 
@@ -43,6 +43,9 @@ pub fn run() {
             services_restart,
             services_open_data,
             services_tail_log,
+            services_config_files,
+            services_config_read,
+            services_config_write,
             presets_list,
             presets_apply,
         ])

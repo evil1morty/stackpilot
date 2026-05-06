@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import type {
   AppEntry,
   CatalogStats,
+  ConfigFileInfo,
   PresetInfo,
   ScoopEvent,
   ScoopStatus,
@@ -58,6 +59,13 @@ export const ipc = {
       key,
       maxLines: maxLines ?? 200,
     }),
+
+  servicesConfigFiles: (key: string) =>
+    invoke<ConfigFileInfo[]>("services_config_files", { key }),
+  servicesConfigRead: (path: string) =>
+    invoke<string>("services_config_read", { path }),
+  servicesConfigWrite: (path: string, content: string) =>
+    invoke<void>("services_config_write", { path, content }),
 
   presetsList: () => invoke<PresetInfo[]>("presets_list"),
   presetsApply: (key: string, onEvent: Channel<ScoopEvent>) =>

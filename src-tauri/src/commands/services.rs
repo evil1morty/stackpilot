@@ -398,6 +398,85 @@ pub struct ServiceLog {
     pub lines: Vec<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigFileInfo {
+    pub path: String,
+    pub label: String,
+    pub language: String,
+    pub exists: bool,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub fn services_config_files(key: String) -> Result<Vec<ConfigFileInfo>, String> {
+    let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
+    let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for cf in known_services::config_files(svc, &root) {
+        let path = cf.path.display().to_string();
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let (exists, size_bytes) = std::fs::metadata(&cf.path)
+            .map(|m| (true, m.len()))
+            .unwrap_or((false, 0));
+        out.push(ConfigFileInfo {
+            path,
+            label: cf.label.to_string(),
+            language: cf.language.to_string(),
+            exists,
+            size_bytes,
+        });
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn services_config_read(path: String) -> Result<String, String> {
+    validate_config_path(&path)?;
+    std::fs::read_to_string(&path).map_err(|e| format!("failed to read {path}: {e}"))
+}
+
+#[tauri::command]
+pub fn services_config_write(path: String, content: String) -> Result<(), String> {
+    validate_config_path(&path)?;
+
+    // Backup-on-save: previous contents go to <path>.bak. Best-effort —
+    // if the source doesn't exist (first write), skip without erroring.
+    if let Ok(prev) = std::fs::read(&path) {
+        let bak = format!("{path}.bak");
+        let _ = std::fs::write(&bak, prev);
+    }
+
+    std::fs::write(&path, content).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
+/// Defense-in-depth for the config-write path. The frontend only writes to
+/// paths returned by services_config_files, but reject anything that isn't
+/// inside a Scoop-managed directory just in case.
+fn validate_config_path(path: &str) -> Result<(), String> {
+    let Some(root) = scoop_root() else {
+        return Err("Scoop is not installed".into());
+    };
+    let normalized = std::path::PathBuf::from(path);
+    let canonical = normalized
+        .canonicalize()
+        .or_else(|_| Ok::<_, std::io::Error>(normalized.clone()))
+        .map_err(|e: std::io::Error| e.to_string())?;
+    let root_canonical = root
+        .canonicalize()
+        .unwrap_or(root.clone());
+    if !canonical.starts_with(&root_canonical) {
+        return Err(format!(
+            "refusing to touch path outside Scoop root: {}",
+            canonical.display()
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn services_tail_log(key: String, max_lines: Option<usize>) -> Result<ServiceLog, String> {
     let limit = max_lines.unwrap_or(200).clamp(1, 2000);

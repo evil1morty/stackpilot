@@ -88,6 +88,14 @@ export type ServiceLog = {
   lines: string[];
 };
 
+export type ConfigFileInfo = {
+  path: string;
+  label: string;
+  language: string;
+  exists: boolean;
+  sizeBytes: number;
+};
+
 export type PresetApp = {
   scoopApp: string;
   installed: boolean;

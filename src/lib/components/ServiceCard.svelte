@@ -3,6 +3,7 @@
   import { goto } from "$app/navigation";
   import { ipc } from "$lib/ipc";
   import type { ServiceInfo, ServiceLog } from "$lib/types";
+  import ConfigEditor from "./ConfigEditor.svelte";
 
   let {
     service,
@@ -16,6 +17,8 @@
   let logs = $state<ServiceLog | null>(null);
   let logsErr = $state<string | null>(null);
   let logEl: HTMLDivElement | undefined = $state();
+
+  let configOpen = $state(false);
 
   const isRunning = $derived(service.status.kind !== "stopped");
   const isOurs = $derived(service.status.kind === "runningTracked");
@@ -164,6 +167,7 @@
       {#if service.persistDir}
         <button class="btn-mini" onclick={openData}>Open data folder</button>
       {/if}
+      <button class="btn-mini ghost" onclick={() => (configOpen = true)}>Configs</button>
       <button class="btn-mini ghost" onclick={() => (logsOpen = !logsOpen)}>
         {logsOpen ? "Hide logs" : "Logs"}
       </button>
@@ -177,11 +181,20 @@
       {#if service.persistDir}
         <button class="btn-mini ghost" onclick={openData}>Data folder</button>
       {/if}
+      <button class="btn-mini ghost" onclick={() => (configOpen = true)}>Configs</button>
       <button class="btn-mini ghost" onclick={() => (logsOpen = !logsOpen)}>
         {logsOpen ? "Hide logs" : "Logs"}
       </button>
     {/if}
   </footer>
+
+  {#if configOpen}
+    <ConfigEditor
+      {service}
+      onClose={() => (configOpen = false)}
+      onSaved={(next) => onChanged(next)}
+    />
+  {/if}
 
   {#if logsOpen}
     <section class="log-panel">

@@ -225,6 +225,54 @@ fn has_any_file(dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Editable config files Stackpilot knows about for a given service.
+/// Resolved against `<scoop_root>/persist/<app>/` and the install dir.
+/// Filter to those that actually exist before showing them in the UI.
+pub fn config_files(svc: &KnownService, scoop_root: &Path) -> Vec<ConfigFile> {
+    let install = scoop_root.join("apps").join(svc.scoop_app).join("current");
+    let persist = scoop_root.join("persist").join(svc.scoop_app);
+    match svc.key {
+        "redis" => vec![
+            ConfigFile::new(persist.join("redis.windows.conf"), "Redis", "ini"),
+            ConfigFile::new(persist.join("redis.conf"), "Redis", "ini"),
+            ConfigFile::new(install.join("redis.windows.conf"), "Redis (default)", "ini"),
+        ],
+        "postgresql" => vec![
+            ConfigFile::new(persist.join("data").join("postgresql.conf"), "PostgreSQL", "ini"),
+            ConfigFile::new(persist.join("data").join("pg_hba.conf"), "Auth (pg_hba)", "conf"),
+            ConfigFile::new(persist.join("data").join("pg_ident.conf"), "Ident", "conf"),
+        ],
+        "mysql" | "mariadb" => vec![
+            ConfigFile::new(install.join("my.ini"), "Server config", "ini"),
+            ConfigFile::new(persist.join("my.cnf"), "User config", "ini"),
+        ],
+        "nginx" => vec![
+            ConfigFile::new(persist.join("conf").join("nginx.conf"), "Nginx", "nginx"),
+            ConfigFile::new(persist.join("conf").join("mime.types"), "MIME types", "conf"),
+        ],
+        "caddy" => vec![ConfigFile::new(persist.join("Caddyfile"), "Caddyfile", "caddy")],
+        _ => vec![],
+    }
+}
+
+/// Single editable config file.
+#[derive(Clone, Debug)]
+pub struct ConfigFile {
+    pub path: PathBuf,
+    pub label: &'static str,
+    pub language: &'static str,
+}
+
+impl ConfigFile {
+    fn new(path: PathBuf, label: &'static str, language: &'static str) -> Self {
+        Self {
+            path,
+            label,
+            language,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
