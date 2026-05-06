@@ -84,10 +84,10 @@
         <span class="status-text">Starting…</span>
       {:else if service.health === "healthy" && service.status.kind === "runningTracked"}
         <span class="status-dot live"></span>
-        <span class="status-text">Healthy</span>
+        <span class="status-text">Running</span>
       {:else if service.health === "healthy"}
         <span class="status-dot ok"></span>
-        <span class="status-text">External · healthy</span>
+        <span class="status-text">External</span>
       {:else if service.health === "degraded"}
         <span class="status-dot warn"></span>
         <span class="status-text">Degraded</span>
@@ -134,10 +134,10 @@
       <button class="btn-mini ghost" onclick={() => (configOpen = true)}>Configs</button>
       <button class="btn-mini ghost" onclick={gotoLogs}>Logs</button>
     {:else}
-      <button class="btn-mini" onclick={() => call("stop")} disabled={busy != null}>
+      <button class="btn-mini danger" onclick={() => call("stop")} disabled={busy != null}>
         {busy === "stop" ? "Stopping…" : "Stop"}
       </button>
-      <button class="btn-mini" onclick={() => call("restart")} disabled={busy != null || !isOurs}>
+      <button class="btn-mini warn" onclick={() => call("restart")} disabled={busy != null || !isOurs}>
         {busy === "restart" ? "Restarting…" : "Restart"}
       </button>
       <button class="btn-mini ghost" onclick={openData}>Folder</button>
@@ -325,6 +325,30 @@
   .btn-mini.primary:hover:not(:disabled) {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
+  }
+
+  .btn-mini.danger {
+    background: var(--danger-soft);
+    border-color: transparent;
+    color: var(--danger);
+  }
+
+  .btn-mini.danger:hover:not(:disabled) {
+    background: var(--danger);
+    color: var(--bg-0);
+    border-color: var(--danger);
+  }
+
+  .btn-mini.warn {
+    background: var(--warning-soft);
+    border-color: transparent;
+    color: var(--warning);
+  }
+
+  .btn-mini.warn:hover:not(:disabled) {
+    background: var(--warning);
+    color: var(--bg-0);
+    border-color: var(--warning);
   }
 
   .btn-mini.ghost {

@@ -76,7 +76,6 @@
   </nav>
 
   <div class="foot">
-    <span class="foot-text">Scoop · Windows</span>
     <SettingsMenu />
   </div>
 </aside>
@@ -197,13 +196,6 @@
     margin-top: 12px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .foot-text {
-    font-size: 11px;
-    color: var(--text-muted);
-    letter-spacing: 0.02em;
+    justify-content: flex-end;
   }
 </style>
