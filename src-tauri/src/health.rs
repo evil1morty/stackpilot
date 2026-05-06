@@ -37,10 +37,11 @@ enum Probe {
 
 fn probe_for(svc: &KnownService) -> Option<Probe> {
     match svc.key {
-        // Caddy's admin API speaks HTTP on 2019 and is reliably present.
         "caddy" => Some(Probe::Http("http://127.0.0.1:2019/config/")),
-        // Nginx default vhost on port 80. Also speaks HTTP.
         "nginx" => Some(Probe::Http("http://127.0.0.1:80/")),
+        "apache" => Some(Probe::Http("http://127.0.0.1:80/")),
+        "meilisearch" => Some(Probe::Http("http://127.0.0.1:7700/health")),
+        "minio" => Some(Probe::Http("http://127.0.0.1:9000/minio/health/live")),
         _ => svc.default_port.map(Probe::Tcp),
     }
 }

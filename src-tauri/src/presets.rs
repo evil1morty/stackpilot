@@ -1,6 +1,7 @@
-//! Curated stack presets — one-click "install + start" bundles. Apps must
-//! reference a Scoop manifest (any bucket) and `auto_start` keys must match
-//! `known_services::KNOWN`.
+//! Curated stack presets — one-click "install + start" bundles modeled on
+//! real-world dev stacks (Laravel Sail, Django/Rails backends, Mastodon,
+//! Supabase, MERN, classic LAMP). Apps must reference a Scoop manifest
+//! (any bucket) and `auto_start` keys must match `known_services::KNOWN`.
 
 pub struct Preset {
     pub key: &'static str,
@@ -14,37 +15,79 @@ pub struct Preset {
 
 pub const PRESETS: &[Preset] = &[
     Preset {
+        key: "lamp-classic",
+        name: "LAMP Classic",
+        description: "Apache + MySQL + Redis. The PHP/WordPress/Drupal default since 2003.",
+        apps: &["apache", "mysql", "redis"],
+        auto_start: &["apache", "mysql", "redis"],
+    },
+    Preset {
         key: "lemp",
         name: "LEMP",
-        description: "Nginx, MariaDB and Redis — the classic Linux/Mac dev stack, on Windows.",
+        description: "Nginx + MariaDB + Redis. Modern PHP stack with the faster web server.",
         apps: &["nginx", "mariadb", "redis"],
         auto_start: &["nginx", "mariadb", "redis"],
     },
     Preset {
-        key: "postgres-stack",
-        name: "Postgres Stack",
-        description: "Nginx + PostgreSQL + Redis. Solid choice for Django, Rails, or Phoenix.",
+        key: "laravel-sail",
+        name: "Laravel Sail",
+        description: "Nginx + MySQL + Redis + Meilisearch — Laravel's official dev stack with Scout search.",
+        apps: &["nginx", "mysql", "redis", "meilisearch"],
+        auto_start: &["nginx", "mysql", "redis", "meilisearch"],
+    },
+    Preset {
+        key: "django-rails",
+        name: "Django / Rails",
+        description: "Nginx + PostgreSQL + Redis. The default backend stack for Django, Rails, Phoenix.",
         apps: &["nginx", "postgresql", "redis"],
         auto_start: &["nginx", "postgresql", "redis"],
     },
     Preset {
-        key: "mern-lite",
-        name: "MERN Lite",
-        description: "Nginx + MongoDB + Redis. NoSQL backend for Node and friends.",
+        key: "mern",
+        name: "MERN",
+        description: "Nginx + MongoDB + Redis. Mongo, Express, React, Node — minus the JS code.",
         apps: &["nginx", "mongodb", "redis"],
         auto_start: &["nginx", "mongodb", "redis"],
     },
     Preset {
+        key: "mastodon-lite",
+        name: "Mastodon Lite",
+        description: "Postgres + Redis + Meilisearch. Search-heavy social — same shape as Mastodon, Discourse, Lemmy.",
+        apps: &["postgresql", "redis", "meilisearch"],
+        auto_start: &["postgresql", "redis", "meilisearch"],
+    },
+    Preset {
+        key: "supabase-stub",
+        name: "Supabase Stub",
+        description: "Postgres + MinIO. Local Backend-as-a-Service: SQL + S3-compatible storage.",
+        apps: &["postgresql", "minio"],
+        auto_start: &["postgresql", "minio"],
+    },
+    Preset {
         key: "caddy-lab",
         name: "Caddy Lab",
-        description: "Caddy with auto-HTTPS, PostgreSQL and Redis. Modern, low-config.",
+        description: "Caddy + PostgreSQL + Redis. Modern, low-config, auto-HTTPS web stack.",
         apps: &["caddy", "postgresql", "redis"],
         auto_start: &["caddy", "postgresql", "redis"],
     },
     Preset {
+        key: "iot-edge",
+        name: "IoT Edge",
+        description: "Mosquitto MQTT + Postgres. Telemetry broker plus storage for time-series data.",
+        apps: &["mosquitto", "postgresql"],
+        auto_start: &["mosquitto", "postgresql"],
+    },
+    Preset {
+        key: "wordpress",
+        name: "WordPress",
+        description: "Apache + MySQL + Memcached. Object-cache-tuned WP host that doesn't need Redis.",
+        apps: &["apache", "mysql", "memcached"],
+        auto_start: &["apache", "mysql", "memcached"],
+    },
+    Preset {
         key: "cache-only",
         name: "Cache Only",
-        description: "Just Redis. For frontend devs who only need a quick local cache.",
+        description: "Just Redis. For the times you only need a quick local key-value store.",
         apps: &["redis"],
         auto_start: &["redis"],
     },

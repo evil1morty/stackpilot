@@ -46,6 +46,7 @@ pub struct KnownService {
 }
 
 pub const KNOWN: &[KnownService] = &[
+    // ── Caches ─────────────────────────────────────────────────────────
     KnownService {
         key: "redis",
         scoop_app: "redis",
@@ -55,6 +56,16 @@ pub const KNOWN: &[KnownService] = &[
         default_port: Some(6379),
         persist_subdir: Some("data"),
     },
+    KnownService {
+        key: "memcached",
+        scoop_app: "memcached",
+        display: "Memcached",
+        category: Category::Cache,
+        bin_relpath: "memcached.exe",
+        default_port: Some(11211),
+        persist_subdir: None,
+    },
+    // ── SQL databases ──────────────────────────────────────────────────
     KnownService {
         key: "postgresql",
         scoop_app: "postgresql",
@@ -82,6 +93,7 @@ pub const KNOWN: &[KnownService] = &[
         default_port: Some(3306),
         persist_subdir: Some("data"),
     },
+    // ── NoSQL ──────────────────────────────────────────────────────────
     KnownService {
         key: "mongodb",
         scoop_app: "mongodb",
@@ -91,6 +103,7 @@ pub const KNOWN: &[KnownService] = &[
         default_port: Some(27017),
         persist_subdir: Some("data"),
     },
+    // ── Web servers ────────────────────────────────────────────────────
     KnownService {
         key: "nginx",
         scoop_app: "nginx",
@@ -101,12 +114,51 @@ pub const KNOWN: &[KnownService] = &[
         persist_subdir: Some("conf"),
     },
     KnownService {
+        key: "apache",
+        scoop_app: "apache",
+        display: "Apache HTTPD",
+        category: Category::WebServer,
+        bin_relpath: "bin/httpd.exe",
+        default_port: Some(80),
+        persist_subdir: Some("conf"),
+    },
+    KnownService {
         key: "caddy",
         scoop_app: "caddy",
         display: "Caddy",
         category: Category::WebServer,
         bin_relpath: "caddy.exe",
         default_port: Some(2019),
+        persist_subdir: None,
+    },
+    // ── Search ─────────────────────────────────────────────────────────
+    KnownService {
+        key: "meilisearch",
+        scoop_app: "meilisearch",
+        display: "Meilisearch",
+        category: Category::Search,
+        bin_relpath: "meilisearch.exe",
+        default_port: Some(7700),
+        persist_subdir: Some("data.ms"),
+    },
+    // ── Storage ────────────────────────────────────────────────────────
+    KnownService {
+        key: "minio",
+        scoop_app: "minio",
+        display: "MinIO",
+        category: Category::Storage,
+        bin_relpath: "minio.exe",
+        default_port: Some(9000),
+        persist_subdir: Some("data"),
+    },
+    // ── Messaging ──────────────────────────────────────────────────────
+    KnownService {
+        key: "mosquitto",
+        scoop_app: "mosquitto",
+        display: "Mosquitto MQTT",
+        category: Category::MessageQueue,
+        bin_relpath: "mosquitto.exe",
+        default_port: Some(1883),
         persist_subdir: None,
     },
 ];
@@ -143,20 +195,38 @@ pub fn persist_dir(svc: &KnownService, scoop_root: &Path) -> Option<PathBuf> {
 /// Service-specific launch args. Kept as a free function so adding a new
 /// service is just one match arm.
 pub fn launch_args(svc: &KnownService, scoop_root: &Path) -> Vec<String> {
+    let persist = scoop_root.join("persist").join(svc.scoop_app);
     match svc.key {
         "postgresql" => {
-            let data = scoop_root
-                .join("persist")
-                .join("postgresql")
-                .join("data");
-            vec!["-D".into(), data.display().to_string()]
+            vec!["-D".into(), persist.join("data").display().to_string()]
         }
         "mongodb" => {
-            let data = scoop_root.join("persist").join("mongodb").join("data");
-            vec!["--dbpath".into(), data.display().to_string()]
+            vec!["--dbpath".into(), persist.join("data").display().to_string()]
         }
         "mysql" | "mariadb" => vec!["--console".into()],
         "caddy" => vec!["run".into()],
+        "minio" => vec![
+            "server".into(),
+            persist.join("data").display().to_string(),
+            "--console-address".into(),
+            ":9001".into(),
+        ],
+        "memcached" => vec!["-l".into(), "127.0.0.1".into()],
+        "meilisearch" => vec![
+            "--http-addr".into(),
+            "127.0.0.1:7700".into(),
+            "--db-path".into(),
+            persist.join("data.ms").display().to_string(),
+            "--no-analytics".into(),
+        ],
+        "mosquitto" => {
+            let conf = persist.join("mosquitto.conf");
+            if conf.exists() {
+                vec!["-c".into(), conf.display().to_string()]
+            } else {
+                vec![]
+            }
+        }
         _ => vec![],
     }
 }
@@ -214,6 +284,18 @@ pub fn init_step(svc: &KnownService, scoop_root: &Path) -> Option<(PathBuf, Vec<
             let _ = std::fs::create_dir_all(&data);
             None
         }
+        "minio" | "meilisearch" => {
+            // Both services create their own data files but require the
+            // parent dir to exist. Pre-create silently.
+            let data = match svc.key {
+                "meilisearch" => persist.join("data.ms"),
+                _ => persist.join("data"),
+            };
+            if !data.exists() {
+                let _ = std::fs::create_dir_all(&data);
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -250,7 +332,12 @@ pub fn config_files(svc: &KnownService, scoop_root: &Path) -> Vec<ConfigFile> {
             ConfigFile::new(persist.join("conf").join("nginx.conf"), "Nginx", "nginx"),
             ConfigFile::new(persist.join("conf").join("mime.types"), "MIME types", "conf"),
         ],
+        "apache" => vec![
+            ConfigFile::new(persist.join("conf").join("httpd.conf"), "httpd", "apache"),
+            ConfigFile::new(persist.join("conf").join("extra").join("httpd-vhosts.conf"), "Vhosts", "apache"),
+        ],
         "caddy" => vec![ConfigFile::new(persist.join("Caddyfile"), "Caddyfile", "caddy")],
+        "mosquitto" => vec![ConfigFile::new(persist.join("mosquitto.conf"), "Broker config", "ini")],
         _ => vec![],
     }
 }
