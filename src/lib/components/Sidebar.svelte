@@ -8,16 +8,14 @@
     href: string;
     label: string;
     icon: IconName;
-    /** Optional Ctrl+number shortcut hint (1..9). */
-    accel?: number;
   };
 
   const items: NavItem[] = [
-    { href: "/", label: "Packages", icon: "grid", accel: 1 },
-    { href: "/services", label: "Services", icon: "activity", accel: 2 },
-    { href: "/projects", label: "Projects", icon: "folder", accel: 3 },
-    { href: "/presets", label: "Presets", icon: "layers", accel: 4 },
-    { href: "/logs", label: "Logs", icon: "terminal", accel: 5 },
+    { href: "/", label: "Services", icon: "activity" },
+    { href: "/packages", label: "Packages", icon: "grid" },
+    { href: "/projects", label: "Projects", icon: "folder" },
+    { href: "/presets", label: "Presets", icon: "layers" },
+    { href: "/logs", label: "Logs", icon: "terminal" },
   ];
 
   function isActive(href: string): boolean {
@@ -73,9 +71,6 @@
           {/if}
         </span>
         <span class="label">{item.label}</span>
-        {#if item.accel}
-          <span class="accel">⌃{item.accel}</span>
-        {/if}
       </a>
     {/each}
   </nav>
@@ -194,19 +189,6 @@
 
   .label {
     flex: 1;
-  }
-
-  .accel {
-    font-size: 10px;
-    color: var(--text-muted);
-    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
-    opacity: 0;
-    transition: opacity 120ms ease;
-  }
-
-  .nav-item:hover .accel,
-  .nav-item.active .accel {
-    opacity: 1;
   }
 
   .foot {

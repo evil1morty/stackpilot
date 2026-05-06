@@ -9,7 +9,7 @@
 
   const navByAccel: Record<string, string> = {
     "1": "/",
-    "2": "/services",
+    "2": "/packages",
     "3": "/projects",
     "4": "/presets",
     "5": "/logs",

@@ -58,7 +58,7 @@
   }
 
   function gotoCatalog() {
-    goto(`/?q=${encodeURIComponent(service.scoopApp)}`);
+    goto(`/packages?q=${encodeURIComponent(service.scoopApp)}`);
   }
 
   function gotoLogs() {
