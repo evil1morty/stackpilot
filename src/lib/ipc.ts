@@ -6,6 +6,7 @@ import type {
   ScoopEvent,
   ScoopStatus,
   ServiceInfo,
+  SortBy,
 } from "./types";
 
 export type PingResponse = {
@@ -19,11 +20,17 @@ export { Channel };
 export const ipc = {
   ping: () => invoke<PingResponse>("ping"),
   scoopCheck: () => invoke<ScoopStatus>("scoop_check"),
-  catalogList: (query?: string, bucket?: string, installedOnly?: boolean) =>
+  catalogList: (
+    query?: string,
+    bucket?: string,
+    installedOnly?: boolean,
+    sort?: SortBy,
+  ) =>
     invoke<AppEntry[]>("catalog_list", {
       query: query?.trim() ? query.trim() : null,
       bucket: bucket ?? null,
       installedOnly: installedOnly ?? false,
+      sort: sort ?? "bestMatch",
     }),
   catalogStats: () => invoke<CatalogStats>("catalog_stats"),
   catalogRefresh: () => invoke<CatalogStats>("catalog_refresh"),

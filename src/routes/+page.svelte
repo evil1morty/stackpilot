@@ -1,9 +1,16 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ipc } from "$lib/ipc";
-  import type { AppEntry, CatalogStats, ScoopStatus } from "$lib/types";
+  import type { AppEntry, CatalogStats, ScoopStatus, SortBy } from "$lib/types";
   import AppCard from "$lib/components/AppCard.svelte";
   import BootstrapModal from "$lib/components/BootstrapModal.svelte";
+
+  const SORT_KEY = "stackpilot.packages.sort";
+  const SORT_LABEL: Record<SortBy, string> = {
+    bestMatch: "Best match",
+    popular: "Popular",
+    name: "Name (A-Z)",
+  };
 
   let scoop = $state<ScoopStatus | null>(null);
   let stats = $state<CatalogStats | null>(null);
@@ -11,6 +18,7 @@
   let query = $state("");
   let bucket = $state<string | null>(null);
   let installedOnly = $state(false);
+  let sort = $state<SortBy>("bestMatch");
   let loading = $state(true);
   let refreshing = $state(false);
   let error = $state<string | null>(null);
@@ -19,6 +27,8 @@
   let searchInput: HTMLInputElement | undefined = $state();
 
   onMount(async () => {
+    const stored = localStorage.getItem(SORT_KEY) as SortBy | null;
+    if (stored && stored in SORT_LABEL) sort = stored;
     await refreshAll();
   });
 
@@ -71,10 +81,16 @@
 
   async function fetchResults() {
     try {
-      results = await ipc.catalogList(query, bucket ?? undefined, installedOnly);
+      results = await ipc.catalogList(query, bucket ?? undefined, installedOnly, sort);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  function setSort(next: SortBy) {
+    sort = next;
+    localStorage.setItem(SORT_KEY, next);
+    fetchResults();
   }
 
   function debouncedFetch() {
@@ -203,6 +219,19 @@
       >
         Installed only
       </button>
+
+      <div class="sort">
+        <label for="sort-select" class="sort-label">Sort</label>
+        <select
+          id="sort-select"
+          value={sort}
+          onchange={(e) => setSort((e.currentTarget as HTMLSelectElement).value as SortBy)}
+        >
+          {#each Object.entries(SORT_LABEL) as [value, label] (value)}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+      </div>
     </div>
 
     <div class="bucket-row">
@@ -424,6 +453,55 @@
     background: var(--accent-soft);
     color: var(--accent);
     border-color: var(--accent-soft);
+  }
+
+  .sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 0 4px 0 10px;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+
+  .sort:focus-within {
+    border-color: var(--accent);
+    background: var(--bg-2);
+  }
+
+  .sort-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    user-select: none;
+  }
+
+  .sort select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 22px 6px 4px;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238a92a3' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+  }
+
+  .sort select:focus {
+    outline: none;
+    border: none;
+  }
+
+  .sort select option {
+    background: var(--bg-1);
+    color: var(--text);
   }
 
   .bucket-row {

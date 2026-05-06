@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::catalog::{self, AppEntry, CatalogStats, ScoopStatus};
+use crate::catalog::{self, AppEntry, CatalogStats, ScoopStatus, SortBy};
 use crate::state::AppState;
 
 const RESULT_CAP: usize = 300;
@@ -10,6 +10,7 @@ pub fn catalog_list(
     query: Option<String>,
     bucket: Option<String>,
     installed_only: Option<bool>,
+    sort: Option<SortBy>,
     state: State<'_, AppState>,
 ) -> Vec<AppEntry> {
     let catalog = state.catalog.ensure();
@@ -18,6 +19,7 @@ pub fn catalog_list(
         query.as_deref(),
         bucket.as_deref(),
         installed_only.unwrap_or(false),
+        sort.unwrap_or_default(),
         RESULT_CAP,
     )
 }

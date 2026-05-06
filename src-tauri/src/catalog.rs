@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
@@ -318,13 +318,52 @@ fn supports_arch(v: &Value) -> Vec<String> {
     out
 }
 
-// ─────────────────────────────────────────── filter + stats ────────────────
+// ─────────────────────────────────────────── filter + sort ────────────────
+
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SortBy {
+    /// Query-relevance first (name-prefix > name-contains > desc-contains),
+    /// with bucket priority as a tiebreaker. The default.
+    #[default]
+    BestMatch,
+    /// Heuristic-curated ordering: main-bucket apps first, then extras,
+    /// then community buckets. Within a bucket, apps with descriptions
+    /// and license metadata rank above bare manifests; alphabetical
+    /// tiebreaker. (Real popularity needs the scoopsearch index — v1.1.)
+    Popular,
+    /// Pure alphabetical, case-insensitive.
+    Name,
+}
+
+/// Lower = ranks earlier. main is canonically the curated bucket.
+fn bucket_priority(bucket: &str) -> u8 {
+    match bucket {
+        "main" => 0,
+        "extras" => 1,
+        "versions" => 2,
+        _ => 3,
+    }
+}
+
+/// Tuple of secondary tiebreakers used for both Popular and BestMatch.
+/// Lower wins.
+fn quality_score(a: &AppEntry) -> (u8, u8) {
+    let no_desc = if a.description.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        1
+    } else {
+        0
+    };
+    let no_license = if a.license.is_none() { 1 } else { 0 };
+    (no_desc, no_license)
+}
 
 pub fn filter(
     catalog: &[AppEntry],
     query: Option<&str>,
     bucket: Option<&str>,
     installed_only: bool,
+    sort: SortBy,
     cap: usize,
 ) -> Vec<AppEntry> {
     let q = query.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty());
@@ -355,21 +394,66 @@ pub fn filter(
         })
         .collect();
 
-    if let Some(q) = q {
-        // Rank: name-prefix > name-contains > description-contains
-        hits.sort_by_key(|a| {
-            let n = a.name.to_lowercase();
-            if n.starts_with(&q) {
-                0
-            } else if n.contains(&q) {
-                1
-            } else {
-                2
-            }
-        });
+    let q_ref = q.as_deref();
+    match sort {
+        SortBy::Name => {
+            hits.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        }
+        SortBy::Popular => {
+            hits.sort_by(|a, b| {
+                let key_a = (
+                    bucket_priority(&a.bucket),
+                    quality_score(a),
+                    a.name.to_lowercase(),
+                );
+                let key_b = (
+                    bucket_priority(&b.bucket),
+                    quality_score(b),
+                    b.name.to_lowercase(),
+                );
+                key_a.cmp(&key_b)
+            });
+        }
+        SortBy::BestMatch => {
+            hits.sort_by(|a, b| {
+                let rank_a = match_rank(a, q_ref);
+                let rank_b = match_rank(b, q_ref);
+                let key_a = (
+                    rank_a,
+                    bucket_priority(&a.bucket),
+                    quality_score(a),
+                    a.name.to_lowercase(),
+                );
+                let key_b = (
+                    rank_b,
+                    bucket_priority(&b.bucket),
+                    quality_score(b),
+                    b.name.to_lowercase(),
+                );
+                key_a.cmp(&key_b)
+            });
+        }
     }
 
     hits.into_iter().take(cap).cloned().collect()
+}
+
+/// Lower = better match. 0 = name == query, 1 = name starts with query,
+/// 2 = name contains, 3 = description contains, 4 = no query (neutral).
+fn match_rank(a: &AppEntry, q: Option<&str>) -> u8 {
+    let Some(q) = q else {
+        return 4;
+    };
+    let name = a.name.to_lowercase();
+    if name == q {
+        0
+    } else if name.starts_with(q) {
+        1
+    } else if name.contains(q) {
+        2
+    } else {
+        3
+    }
 }
 
 pub fn stats(catalog: &[AppEntry]) -> CatalogStats {
@@ -527,37 +611,73 @@ mod tests {
         assert_eq!(supports_arch(&v_simple), vec!["64bit"]);
     }
 
+    fn entry(name: &str, bucket: &str, desc: Option<&str>, license: Option<&str>) -> AppEntry {
+        AppEntry {
+            name: name.into(),
+            bucket: bucket.into(),
+            version: "1".into(),
+            description: desc.map(String::from),
+            homepage: None,
+            license: license.map(String::from),
+            depends: vec![],
+            suggest: vec![],
+            bins: vec![],
+            supports_arch: vec!["64bit".into()],
+            installed: None,
+        }
+    }
+
     #[test]
-    fn filter_ranks_name_prefix_higher_than_description() {
+    fn best_match_ranks_exact_name_first() {
         let entries = vec![
-            AppEntry {
-                name: "alpha".into(),
-                bucket: "main".into(),
-                version: "1".into(),
-                description: Some("redis client".into()),
-                homepage: None,
-                license: None,
-                depends: vec![],
-                suggest: vec![],
-                bins: vec![],
-                supports_arch: vec!["64bit".into()],
-                installed: None,
-            },
-            AppEntry {
-                name: "redis".into(),
-                bucket: "main".into(),
-                version: "7".into(),
-                description: Some("server".into()),
-                homepage: None,
-                license: None,
-                depends: vec![],
-                suggest: vec![],
-                bins: vec![],
-                supports_arch: vec!["64bit".into()],
-                installed: None,
-            },
+            entry("alpha", "main", Some("redis client"), None),
+            entry("redis", "main", Some("server"), None),
         ];
-        let result = filter(&entries, Some("redis"), None, false, 10);
+        let result = filter(&entries, Some("redis"), None, false, SortBy::BestMatch, 10);
         assert_eq!(result[0].name, "redis");
+    }
+
+    #[test]
+    fn best_match_breaks_ties_with_bucket_priority() {
+        let entries = vec![
+            entry("redis-extra", "extras", Some("variant"), None),
+            entry("redis-fork", "main", Some("variant"), None),
+        ];
+        let result = filter(&entries, Some("redis"), None, false, SortBy::BestMatch, 10);
+        // Both contain "redis" as prefix; main bucket should rank first.
+        assert_eq!(result[0].bucket, "main");
+        assert_eq!(result[1].bucket, "extras");
+    }
+
+    #[test]
+    fn popular_puts_main_bucket_first() {
+        let entries = vec![
+            entry("zzz", "extras", Some("desc"), Some("MIT")),
+            entry("aaa", "main", None, None),
+        ];
+        let result = filter(&entries, None, None, false, SortBy::Popular, 10);
+        assert_eq!(result[0].bucket, "main");
+    }
+
+    #[test]
+    fn popular_uses_metadata_bonus_within_bucket() {
+        let entries = vec![
+            entry("a", "main", None, None),
+            entry("b", "main", Some("has desc"), Some("MIT")),
+        ];
+        let result = filter(&entries, None, None, false, SortBy::Popular, 10);
+        // Same bucket → richer metadata wins over alphabetical "a < b".
+        assert_eq!(result[0].name, "b");
+    }
+
+    #[test]
+    fn name_sort_is_pure_alphabetical() {
+        let entries = vec![
+            entry("zlib", "main", None, None),
+            entry("apache", "extras", Some("desc"), Some("Apache-2.0")),
+        ];
+        let result = filter(&entries, None, None, false, SortBy::Name, 10);
+        assert_eq!(result[0].name, "apache");
+        assert_eq!(result[1].name, "zlib");
     }
 }

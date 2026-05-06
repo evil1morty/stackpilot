@@ -49,7 +49,14 @@ fn walks_real_scoop_install_when_present() {
     );
 
     // Spot-check filter: searching "redis" should rank "redis" first.
-    let hits = catalog::filter(&entries, Some("redis"), None, false, 10);
+    let hits = catalog::filter(
+        &entries,
+        Some("redis"),
+        None,
+        false,
+        catalog::SortBy::BestMatch,
+        10,
+    );
     assert!(!hits.is_empty(), "redis search returned nothing");
     assert_eq!(hits[0].name, "redis", "redis should rank first by name match");
 

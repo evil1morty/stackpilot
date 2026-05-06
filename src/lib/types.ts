@@ -36,6 +36,8 @@ export type ScoopStatus = {
   buckets: string[];
 };
 
+export type SortBy = "bestMatch" | "popular" | "name";
+
 export type ScoopEvent =
   | { type: "started"; payload: { command: string } }
   | { type: "stdout"; payload: { line: string } }
