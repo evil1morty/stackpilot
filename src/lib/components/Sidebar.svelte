@@ -191,9 +191,8 @@
   }
 
   .foot {
-    padding: 12px 10px 4px 10px;
-    border-top: 1px solid var(--border);
-    margin-top: 12px;
+    padding: 8px 6px 0 6px;
+    margin-top: 8px;
     display: flex;
     align-items: center;
     justify-content: flex-end;

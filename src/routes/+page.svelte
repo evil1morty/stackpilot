@@ -7,6 +7,7 @@
 
   let services = $state<ServiceInfo[]>([]);
   let loading = $state(true);
+  let manualRefreshing = $state(false);
   let error = $state<string | null>(null);
 
   let pollHandle: ReturnType<typeof setInterval> | null = null;
@@ -28,6 +29,15 @@
       error = e instanceof Error ? e.message : String(e);
     } finally {
       loading = false;
+    }
+  }
+
+  async function manualRefresh() {
+    manualRefreshing = true;
+    try {
+      await refresh();
+    } finally {
+      manualRefreshing = false;
     }
   }
 
@@ -58,7 +68,30 @@
       </p>
     </div>
     {#if installed.length > 0}
-      <button class="btn" onclick={refresh}>Refresh</button>
+      <button
+        class="btn"
+        class:spinning={manualRefreshing}
+        onclick={manualRefresh}
+        disabled={manualRefreshing}
+        title="Refresh service status"
+      >
+        <svg
+          class="refresh-icon"
+          viewBox="0 0 24 24"
+          width="14"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+        </svg>
+        {manualRefreshing ? "Refreshing…" : "Refresh"}
+      </button>
     {/if}
   </header>
 
@@ -162,5 +195,15 @@
     color: var(--text-dim);
     max-width: 480px;
     line-height: 1.5;
+  }
+
+  .btn.spinning .refresh-icon {
+    animation: spin 0.9s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
