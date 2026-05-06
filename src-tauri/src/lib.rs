@@ -1,5 +1,6 @@
 mod catalog;
 mod commands;
+mod health;
 mod known_services;
 mod persistence;
 mod presets;

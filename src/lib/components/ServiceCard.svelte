@@ -110,6 +110,18 @@
       {:else if service.status.kind === "stopped"}
         <span class="status-dot off"></span>
         <span class="status-text">Stopped</span>
+      {:else if service.health === "starting"}
+        <span class="status-dot starting"></span>
+        <span class="status-text">Starting…</span>
+      {:else if service.health === "healthy" && service.status.kind === "runningTracked"}
+        <span class="status-dot live"></span>
+        <span class="status-text">Healthy</span>
+      {:else if service.health === "healthy"}
+        <span class="status-dot ok"></span>
+        <span class="status-text">External · healthy</span>
+      {:else if service.health === "degraded"}
+        <span class="status-dot warn"></span>
+        <span class="status-text">Degraded</span>
       {:else if service.status.kind === "runningTracked"}
         <span class="status-dot live"></span>
         <span class="status-text">Running</span>
@@ -263,6 +275,10 @@
     box-shadow: 0 0 0 3px var(--success-soft);
   }
 
+  .status-dot.ok {
+    background: var(--success);
+  }
+
   .status-dot.warn {
     background: var(--warning);
     box-shadow: 0 0 0 3px var(--warning-soft);
@@ -270,6 +286,17 @@
 
   .status-dot.off {
     background: var(--text-muted);
+  }
+
+  .status-dot.starting {
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+    animation: pulse-starting 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-starting {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
   }
 
   .status-text {

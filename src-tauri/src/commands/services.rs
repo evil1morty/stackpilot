@@ -6,6 +6,7 @@
 //! recorded PID still owns the recorded port.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use serde::Serialize;
@@ -13,10 +14,15 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 use tokio::process::Command;
 
+use crate::health::{self, ServiceHealth};
 use crate::known_services::{self, KnownService};
 use crate::scoop::scoop_root;
 use crate::service_logs;
 use crate::state::{AppState, TrackedService};
+
+/// How long after start we treat "port not yet bound" as "Starting" rather
+/// than failed/dead. Most services bind in <500ms; 5s is a generous cushion.
+const STARTUP_GRACE_SECS: u64 = 5;
 
 // ─────────────────────────────────────────────── public DTOs ──────────────
 
@@ -44,6 +50,7 @@ pub struct ServiceInfo {
     pub category: String,
     pub installed: bool,
     pub status: ServiceStatus,
+    pub health: ServiceHealth,
     pub default_port: Option<u16>,
     pub persist_dir: Option<String>,
     pub bin_path: Option<String>,
@@ -75,11 +82,18 @@ fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedService>)
     ServiceStatus::Stopped
 }
 
-/// Drop tracked entries whose recorded PID no longer owns the recorded port.
+/// Drop tracked entries whose recorded PID no longer owns the recorded port,
+/// with a brief startup grace window so a service mid-boot isn't culled.
 /// Returns true if anything was removed (caller should persist).
 fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
+    let now = unix_now();
     let mut dead: Vec<String> = Vec::new();
     for (k, t) in tracked.iter() {
+        // Grace window: don't cull a freshly-started service that hasn't
+        // bound its port yet.
+        if now.saturating_sub(t.started_at) < STARTUP_GRACE_SECS {
+            continue;
+        }
         let alive = match t.port {
             Some(port) => pid_on_port(port) == Some(t.pid),
             None => false,
@@ -105,38 +119,93 @@ fn unix_now() -> u64 {
 // ─────────────────────────────────────────────── commands ─────────────────
 
 #[tauri::command]
-pub fn services_list(state: State<'_, AppState>) -> Vec<ServiceInfo> {
+pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, String> {
     let root = scoop_root();
-    let mut tracked = state.tracked.lock();
-    let changed = sweep_dead(&mut tracked);
-    drop(tracked);
-    if changed {
-        state.persist_tracked();
-    }
-    let tracked = state.tracked.lock();
 
-    known_services::KNOWN
+    // Sweep + persist before snapshotting so the snapshot reflects truth.
+    {
+        let mut tracked = state.tracked.lock();
+        let changed = sweep_dead(&mut tracked);
+        drop(tracked);
+        if changed {
+            state.persist_tracked();
+        }
+    }
+    let tracked_snapshot: HashMap<String, TrackedService> = state.tracked.lock().clone();
+    let now = unix_now();
+
+    // Materialize per-service inputs synchronously so each async probe owns
+    // everything it needs (no shared borrow across .await points).
+    struct Row {
+        svc: &'static KnownService,
+        bin: Option<PathBuf>,
+        installed: bool,
+        persist_dir: Option<String>,
+        tracked_entry: Option<TrackedService>,
+        external_pid: Option<u32>,
+    }
+    let rows: Vec<Row> = known_services::KNOWN
         .iter()
         .map(|svc| {
             let bin = root.as_ref().map(|r| known_services::bin_path(svc, r));
             let installed = bin.as_ref().is_some_and(|p| p.exists());
-
-            ServiceInfo {
-                key: svc.key.to_string(),
-                scoop_app: svc.scoop_app.to_string(),
-                display: svc.display.to_string(),
-                category: svc.category.as_str().to_string(),
+            let persist_dir = root
+                .as_ref()
+                .and_then(|r| known_services::persist_dir(svc, r))
+                .map(|p| p.display().to_string());
+            let tracked_entry = tracked_snapshot.get(svc.key).cloned();
+            let external_pid = if tracked_entry.is_none() {
+                svc.default_port.and_then(pid_on_port)
+            } else {
+                None
+            };
+            Row {
+                svc,
+                bin,
                 installed,
-                status: current_status(svc, &tracked),
-                default_port: svc.default_port,
-                persist_dir: root
-                    .as_ref()
-                    .and_then(|r| known_services::persist_dir(svc, r))
-                    .map(|p| p.display().to_string()),
-                bin_path: bin.map(|p| p.display().to_string()),
+                persist_dir,
+                tracked_entry,
+                external_pid,
             }
         })
-        .collect()
+        .collect();
+
+    let probes = rows.into_iter().map(|row| async move {
+        let status = match (&row.tracked_entry, row.external_pid) {
+            (Some(t), _) => ServiceStatus::RunningTracked {
+                pid: t.pid,
+                started_at: t.started_at,
+            },
+            (None, Some(pid)) => ServiceStatus::RunningExternal { pid },
+            _ => ServiceStatus::Stopped,
+        };
+
+        let health = match (&row.tracked_entry, row.external_pid) {
+            (Some(t), _)
+                if now.saturating_sub(t.started_at) < STARTUP_GRACE_SECS
+                    && row.svc.default_port.and_then(pid_on_port) != Some(t.pid) =>
+            {
+                ServiceHealth::Starting
+            }
+            (Some(_), _) | (None, Some(_)) => health::check(row.svc).await,
+            _ => ServiceHealth::Unknown,
+        };
+
+        ServiceInfo {
+            key: row.svc.key.to_string(),
+            scoop_app: row.svc.scoop_app.to_string(),
+            display: row.svc.display.to_string(),
+            category: row.svc.category.as_str().to_string(),
+            installed: row.installed,
+            status,
+            health,
+            default_port: row.svc.default_port,
+            persist_dir: row.persist_dir,
+            bin_path: row.bin.map(|p| p.display().to_string()),
+        }
+    });
+
+    Ok(futures::future::join_all(probes).await)
 }
 
 /// Implementation of `services_start` that takes a borrowed `AppState`.
@@ -373,6 +442,10 @@ fn build_info(svc: &KnownService, state: &State<'_, AppState>) -> ServiceInfo {
     build_info_for(svc, state)
 }
 
+/// Builds a ServiceInfo without doing any async health probe. The caller
+/// (services_start / stop / restart) is returning a snapshot the UI will
+/// soon overwrite via the next services_list poll, so it's fine to leave
+/// `health` at Unknown here.
 fn build_info_for(svc: &KnownService, state: &AppState) -> ServiceInfo {
     let root = scoop_root();
     let bin = root.as_ref().map(|r| known_services::bin_path(svc, r));
@@ -386,6 +459,7 @@ fn build_info_for(svc: &KnownService, state: &AppState) -> ServiceInfo {
         category: svc.category.as_str().to_string(),
         installed,
         status: current_status(svc, &tracked),
+        health: ServiceHealth::Unknown,
         default_port: svc.default_port,
         persist_dir: root
             .as_ref()

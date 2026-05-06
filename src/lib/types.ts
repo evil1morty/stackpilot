@@ -66,6 +66,8 @@ export type ServiceCategory =
   | "search"
   | "storage";
 
+export type ServiceHealth = "unknown" | "starting" | "healthy" | "degraded";
+
 export type ServiceInfo = {
   key: string;
   scoopApp: string;
@@ -73,6 +75,7 @@ export type ServiceInfo = {
   category: ServiceCategory | string;
   installed: boolean;
   status: ServiceStatus;
+  health: ServiceHealth;
   defaultPort: number | null;
   persistDir: string | null;
   binPath: string | null;
