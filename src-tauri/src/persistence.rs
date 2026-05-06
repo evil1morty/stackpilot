@@ -42,10 +42,14 @@ pub fn state_file() -> PathBuf {
     state_dir().join(STATE_FILENAME)
 }
 
-/// Logs live alongside state. Created on first write. Used by Phase B.
-#[allow(dead_code)]
+/// Logs live alongside state. Created on first write.
 pub fn logs_dir() -> PathBuf {
     state_dir().join("logs")
+}
+
+/// Path of a service's log file: `<logs_dir>/<key>.log`.
+pub fn log_file_for(key: &str) -> PathBuf {
+    logs_dir().join(format!("{key}.log"))
 }
 
 /// Read state from disk. Missing or malformed file yields a fresh empty state

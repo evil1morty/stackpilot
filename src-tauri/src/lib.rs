@@ -5,6 +5,7 @@ mod persistence;
 mod presets;
 mod scoop;
 mod scoopsearch;
+mod service_logs;
 mod state;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
@@ -15,6 +16,7 @@ use commands::scoop_ops::{
 };
 use commands::services::{
     services_list, services_open_data, services_restart, services_start, services_stop,
+    services_tail_log,
 };
 use state::AppState;
 
@@ -39,6 +41,7 @@ pub fn run() {
             services_stop,
             services_restart,
             services_open_data,
+            services_tail_log,
             presets_list,
             presets_apply,
         ])

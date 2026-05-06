@@ -15,6 +15,7 @@ use tokio::process::Command;
 
 use crate::known_services::{self, KnownService};
 use crate::scoop::scoop_root;
+use crate::service_logs;
 use crate::state::{AppState, TrackedService};
 
 // ─────────────────────────────────────────────── public DTOs ──────────────
@@ -174,11 +175,16 @@ pub(crate) async fn services_start_inner(
     let cwd = known_services::working_dir(svc, &root);
     let args = known_services::launch_args(svc, &root);
 
+    // Capture stdout + stderr to <state_dir>/logs/<key>.log so users can
+    // tail them from the Logs panel without needing an external terminal.
+    let log = service_logs::prepare_for_spawn(svc.key)
+        .map_err(|e| format!("failed to open log file for {}: {}", svc.display, e))?;
+
     let mut cmd = Command::new(&bin);
     cmd.args(&args)
         .current_dir(&cwd)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(log.stdout))
+        .stderr(Stdio::from(log.stderr))
         .stdin(Stdio::null());
 
     #[cfg(windows)]
@@ -275,6 +281,31 @@ pub async fn services_restart(
     // Brief pause so OS releases the port before we rebind.
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
     services_start(key, state).await
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLog {
+    pub key: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub lines: Vec<String>,
+}
+
+#[tauri::command]
+pub fn services_tail_log(key: String, max_lines: Option<usize>) -> Result<ServiceLog, String> {
+    let limit = max_lines.unwrap_or(200).clamp(1, 2000);
+    let lines = service_logs::tail(&key, limit).map_err(|e| e.to_string())?;
+    let path = crate::persistence::log_file_for(&key)
+        .display()
+        .to_string();
+    let size_bytes = service_logs::size(&key);
+    Ok(ServiceLog {
+        key,
+        path,
+        size_bytes,
+        lines,
+    })
 }
 
 #[tauri::command]

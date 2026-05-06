@@ -1,7 +1,8 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { goto } from "$app/navigation";
   import { ipc } from "$lib/ipc";
-  import type { ServiceInfo } from "$lib/types";
+  import type { ServiceInfo, ServiceLog } from "$lib/types";
 
   let {
     service,
@@ -10,6 +11,11 @@
 
   let busy = $state<"start" | "stop" | "restart" | null>(null);
   let actionError = $state<string | null>(null);
+
+  let logsOpen = $state(false);
+  let logs = $state<ServiceLog | null>(null);
+  let logsErr = $state<string | null>(null);
+  let logEl: HTMLDivElement | undefined = $state();
 
   const isRunning = $derived(service.status.kind !== "stopped");
   const isOurs = $derived(service.status.kind === "runningTracked");
@@ -27,6 +33,32 @@
     search: "Search",
     storage: "Storage",
   };
+
+  $effect(() => {
+    if (!logsOpen) return;
+    let cancelled = false;
+
+    async function refresh() {
+      try {
+        logs = await ipc.servicesTailLog(service.key, 200);
+        logsErr = null;
+        await tick();
+        if (logEl) logEl.scrollTop = logEl.scrollHeight;
+      } catch (e) {
+        logsErr = e instanceof Error ? e.message : String(e);
+      }
+    }
+    refresh();
+
+    const interval = setInterval(() => {
+      if (!cancelled) refresh();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  });
 
   async function call(action: "start" | "stop" | "restart") {
     busy = action;
@@ -56,6 +88,12 @@
 
   function gotoCatalog() {
     goto(`/?q=${encodeURIComponent(service.scoopApp)}`);
+  }
+
+  function fmtSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 </script>
 
@@ -114,6 +152,9 @@
       {#if service.persistDir}
         <button class="btn-mini" onclick={openData}>Open data folder</button>
       {/if}
+      <button class="btn-mini ghost" onclick={() => (logsOpen = !logsOpen)}>
+        {logsOpen ? "Hide logs" : "Logs"}
+      </button>
     {:else}
       <button class="btn-mini" onclick={() => call("stop")} disabled={busy != null}>
         {busy === "stop" ? "Stopping…" : "Stop"}
@@ -124,8 +165,41 @@
       {#if service.persistDir}
         <button class="btn-mini ghost" onclick={openData}>Data folder</button>
       {/if}
+      <button class="btn-mini ghost" onclick={() => (logsOpen = !logsOpen)}>
+        {logsOpen ? "Hide logs" : "Logs"}
+      </button>
     {/if}
   </footer>
+
+  {#if logsOpen}
+    <section class="log-panel">
+      <div class="log-head">
+        <span class="log-title">Logs</span>
+        <span class="log-stat">
+          {#if logs}
+            {fmtSize(logs.sizeBytes)} · {logs.lines.length} lines
+          {:else}
+            …
+          {/if}
+        </span>
+      </div>
+      <div class="log-body" bind:this={logEl}>
+        {#if logsErr}
+          <div class="log-err">{logsErr}</div>
+        {:else if logs && logs.lines.length === 0}
+          <div class="log-empty">
+            {service.status.kind === "stopped"
+              ? "No logs yet. Start the service to capture output."
+              : "Service is running but hasn't written anything yet."}
+          </div>
+        {:else if logs}
+          {#each logs.lines as line, i (i)}
+            <div class="log-line">{line || " "}</div>
+          {/each}
+        {/if}
+      </div>
+    </section>
+  {/if}
 </article>
 
 <style>
@@ -294,5 +368,61 @@
   .btn-mini.ghost:hover {
     background: var(--bg-2);
     color: var(--text);
+  }
+
+  .log-panel {
+    background: #07080b;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-top: 4px;
+    overflow: hidden;
+  }
+
+  .log-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+  }
+
+  .log-title {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .log-stat {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  .log-body {
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 8px 12px;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: var(--text-dim);
+  }
+
+  .log-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .log-empty,
+  .log-err {
+    color: var(--text-muted);
+    font-style: italic;
+    font-family: inherit;
+  }
+
+  .log-err {
+    color: var(--danger);
   }
 </style>

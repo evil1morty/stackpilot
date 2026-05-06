@@ -6,6 +6,7 @@ import type {
   ScoopEvent,
   ScoopStatus,
   ServiceInfo,
+  ServiceLog,
   SortBy,
 } from "./types";
 
@@ -52,6 +53,11 @@ export const ipc = {
     invoke<ServiceInfo>("services_restart", { key }),
   servicesOpenData: (key: string) =>
     invoke<void>("services_open_data", { key }),
+  servicesTailLog: (key: string, maxLines?: number) =>
+    invoke<ServiceLog>("services_tail_log", {
+      key,
+      maxLines: maxLines ?? 200,
+    }),
 
   presetsList: () => invoke<PresetInfo[]>("presets_list"),
   presetsApply: (key: string, onEvent: Channel<ScoopEvent>) =>

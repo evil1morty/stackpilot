@@ -78,6 +78,13 @@ export type ServiceInfo = {
   binPath: string | null;
 };
 
+export type ServiceLog = {
+  key: string;
+  path: string;
+  sizeBytes: number;
+  lines: string[];
+};
+
 export type PresetApp = {
   scoopApp: string;
   installed: boolean;
