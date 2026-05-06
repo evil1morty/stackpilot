@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
+  import { goto } from "$app/navigation";
   import { ipc } from "$lib/ipc";
   import type { ServiceInfo } from "$lib/types";
   import ServiceCard from "$lib/components/ServiceCard.svelte";
@@ -35,7 +36,6 @@
   }
 
   const installed = $derived(services.filter((s) => s.installed));
-  const notInstalled = $derived(services.filter((s) => !s.installed));
   const running = $derived(
     installed.filter((s) => s.status.kind !== "stopped").length,
   );
@@ -57,7 +57,9 @@
         {/if}
       </p>
     </div>
-    <button class="btn" onclick={refresh}>Refresh</button>
+    {#if installed.length > 0}
+      <button class="btn" onclick={refresh}>Refresh</button>
+    {/if}
   </header>
 
   {#if error}
@@ -73,20 +75,17 @@
         <ServiceCard service={svc} onChanged={patch} />
       {/each}
     </div>
-  {/if}
-
-  {#if notInstalled.length > 0 && !loading}
-    <section class="more">
-      <h2>More services</h2>
-      <p class="more-lede">
-        Install any of these from the Catalog to manage them here.
+  {:else if !loading}
+    <div class="empty">
+      <p class="empty-title">Nothing to start yet.</p>
+      <p class="empty-body">
+        Stackpilot can manage Redis, PostgreSQL, MySQL, MariaDB, MongoDB, Nginx,
+        and Caddy. Install any of them from Packages and they'll show up here.
       </p>
-      <div class="more-grid">
-        {#each notInstalled as svc (svc.key)}
-          <ServiceCard service={svc} onChanged={patch} />
-        {/each}
-      </div>
-    </section>
+      <button class="btn btn-primary" onclick={() => goto("/")}>
+        Browse packages →
+      </button>
+    </div>
   {/if}
 </section>
 
@@ -137,31 +136,30 @@
     gap: 14px;
   }
 
-  .more {
-    margin-top: 40px;
-    padding-top: 28px;
-    border-top: 1px solid var(--border);
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    padding: 80px 24px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-1);
   }
 
-  .more h2 {
+  .empty-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .empty-body {
+    margin: 0;
     font-size: 13px;
-    font-weight: 500;
     color: var(--text-dim);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin: 0 0 4px 0;
-  }
-
-  .more-lede {
-    font-size: 12.5px;
-    color: var(--text-muted);
-    margin: 0 0 16px 0;
-  }
-
-  .more-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 12px;
-    opacity: 0.65;
+    max-width: 480px;
+    line-height: 1.5;
   }
 </style>

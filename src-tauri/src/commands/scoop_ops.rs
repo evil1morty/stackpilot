@@ -194,6 +194,43 @@ pub async fn scoop_install(
 }
 
 #[tauri::command]
+pub async fn scoop_update(
+    app: String,
+    on_event: Channel<ScoopEvent>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    if state.running_pid.lock().is_some() {
+        let msg = "another scoop operation is already running".to_string();
+        let _ = on_event.send(ScoopEvent::Error {
+            message: msg.clone(),
+        });
+        return Err(msg);
+    }
+    if let Err(e) = validate_app_ref(&app) {
+        let _ = on_event.send(ScoopEvent::Error {
+            message: e.clone(),
+        });
+        return Err(e);
+    }
+
+    let cmd = match scoop_powershell(&["update", &app]) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = on_event.send(ScoopEvent::Error {
+                message: e.clone(),
+            });
+            return Err(e);
+        }
+    };
+    let label = format!("scoop update {app}");
+    let exit_code = drive(cmd, &on_event, &state, &label).await?;
+    let _ = on_event.send(ScoopEvent::Finished { exit_code });
+
+    state.catalog.refresh();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn scoop_uninstall(
     app: String,
     on_event: Channel<ScoopEvent>,

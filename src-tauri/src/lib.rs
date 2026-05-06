@@ -8,7 +8,9 @@ mod state;
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
 use commands::presets_ops::{presets_apply, presets_list};
-use commands::scoop_ops::{scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall};
+use commands::scoop_ops::{
+    scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall, scoop_update,
+};
 use commands::services::{
     services_list, services_open_data, services_restart, services_start, services_stop,
 };
@@ -27,6 +29,7 @@ pub fn run() {
             scoop_check,
             scoop_install,
             scoop_uninstall,
+            scoop_update,
             scoop_bootstrap,
             scoop_cancel,
             services_list,

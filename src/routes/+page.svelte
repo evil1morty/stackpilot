@@ -16,9 +16,37 @@
   let error = $state<string | null>(null);
 
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchInput: HTMLInputElement | undefined = $state();
 
   onMount(async () => {
     await refreshAll();
+  });
+
+  $effect(() => {
+    function onKey(e: KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInput?.focus();
+        searchInput?.select();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        if (!refreshing && scoop?.installed) refreshCatalog();
+        return;
+      }
+      if (e.key === "Escape" && isTyping && target === searchInput && query) {
+        e.preventDefault();
+        clearQuery();
+        searchInput?.blur();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
   async function refreshAll() {
@@ -78,17 +106,29 @@
     query = "";
     fetchResults();
   }
+
+  const placeholder = $derived.by(() => {
+    if (!stats) return "Search packages…";
+    return `Search ${stats.total.toLocaleString()} packages…`;
+  });
 </script>
 
 <section class="page">
   <header class="head">
     <div>
-      <h1>Catalog</h1>
+      <h1>Packages</h1>
       <p class="lede">
         {#if stats}
           {stats.total.toLocaleString()} apps
           <span class="dot-sep">·</span>
-          {stats.installed} installed
+          <button
+            class="stat-link"
+            class:active={installedOnly}
+            onclick={toggleInstalled}
+            title="Toggle installed-only filter"
+          >
+            {stats.installed} installed
+          </button>
           <span class="dot-sep">·</span>
           {stats.buckets.length} buckets
         {:else if loading}
@@ -99,9 +139,24 @@
       </p>
     </div>
     {#if scoop?.installed}
-      <button class="btn" onclick={refreshCatalog} disabled={refreshing} title="Re-scan buckets">
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
-          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button
+        class="btn"
+        class:spinning={refreshing}
+        onclick={refreshCatalog}
+        disabled={refreshing}
+        title="Re-scan buckets (Ctrl+R)"
+      >
+        <svg
+          class="refresh-icon"
+          viewBox="0 0 24 24"
+          width="14"
+          height="14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <polyline points="23 4 23 10 17 10" />
           <polyline points="1 20 1 14 7 14" />
           <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
@@ -128,12 +183,15 @@
         </svg>
         <input
           type="text"
-          placeholder="Search 1,500+ apps…"
+          {placeholder}
           bind:value={query}
+          bind:this={searchInput}
           oninput={debouncedFetch}
         />
         {#if query}
           <button class="clear" onclick={clearQuery} aria-label="Clear search">×</button>
+        {:else}
+          <kbd class="hint" title="Focus search">Ctrl K</kbd>
         {/if}
       </div>
 
@@ -168,13 +226,26 @@
 
     <div class="grid">
       {#each results as app (app.bucket + "/" + app.name)}
-        <AppCard {app} />
+        <AppCard {app} onChanged={refreshAll} />
       {/each}
     </div>
 
     {#if results.length === 0 && !loading}
       <div class="empty">
-        <p>No apps match.</p>
+        <p>No packages match.</p>
+        {#if query || bucket || installedOnly}
+          <button
+            class="btn"
+            onclick={() => {
+              query = "";
+              bucket = null;
+              installedOnly = false;
+              fetchResults();
+            }}
+          >
+            Clear filters
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -229,6 +300,31 @@
   .dot-sep {
     color: var(--text-muted);
     margin: 0 4px;
+  }
+
+  .stat-link {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--text-dim);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-decoration-color: var(--border-strong);
+    text-decoration-thickness: 1px;
+    transition: color 120ms ease, text-decoration-color 120ms ease;
+  }
+
+  .stat-link:hover {
+    color: var(--text);
+    text-decoration-color: var(--text-dim);
+  }
+
+  .stat-link.active {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+    font-weight: 600;
   }
 
   .error-banner {
@@ -292,6 +388,19 @@
 
   .clear:hover {
     color: var(--text);
+  }
+
+  .hint {
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    padding: 1px 6px;
+    user-select: none;
+    flex-shrink: 0;
   }
 
   .filter-pill {
@@ -371,10 +480,17 @@
   }
 
   .empty {
-    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
     padding: 80px 0;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .empty p {
+    margin: 0;
   }
 
   .cap-hint {
@@ -398,6 +514,10 @@
     border-top-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+  }
+
+  .btn.spinning .refresh-icon {
+    animation: spin 0.9s linear infinite;
   }
 
   @keyframes spin {

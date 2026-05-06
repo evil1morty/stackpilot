@@ -32,6 +32,8 @@ export const ipc = {
     invoke<void>("scoop_install", { app, onEvent }),
   scoopUninstall: (app: string, onEvent: Channel<ScoopEvent>) =>
     invoke<void>("scoop_uninstall", { app, onEvent }),
+  scoopUpdate: (app: string, onEvent: Channel<ScoopEvent>) =>
+    invoke<void>("scoop_update", { app, onEvent }),
   scoopBootstrap: (onEvent: Channel<ScoopEvent>) =>
     invoke<void>("scoop_bootstrap", { onEvent }),
   scoopCancel: () => invoke<boolean>("scoop_cancel"),

@@ -11,9 +11,10 @@ weighs ~10 MB instead of 100+.
 
 ## Features
 
-- **Catalog** — browse every Scoop manifest (3,800+ across `main` and
+- **Packages** — browse every Scoop manifest (3,800+ across `main` and
   `extras`), filter by bucket, search with sub-200 ms debounce, install
-  with one click.
+  with one click. Update / Uninstall in place when something's already
+  installed.
 - **Services** — start / stop / restart Redis, Postgres, MySQL, MariaDB,
   MongoDB, Nginx, Caddy. Detects port conflicts before launching, and
   picks up services started outside Stackpilot via port-PID lookup.
@@ -31,6 +32,8 @@ weighs ~10 MB instead of 100+.
 - **SvelteKit** + Svelte 5 runes (SPA mode via `adapter-static`)
 - **Bun** for the JS toolchain
 - **rayon** for parallel manifest parsing — 3,800 JSON files in ~0.4 s
+- Keyboard: **Ctrl+1..4** switches view, **Ctrl+K** focuses search,
+  **Ctrl+R** rescans buckets, **Esc** clears search
 - **listeners** crate for `GetExtendedTcpTable`-based port → PID lookup
 - **tokio::process** for spawning + streaming child output
 

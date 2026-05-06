@@ -1,7 +1,7 @@
 import { Channel, ipc } from "$lib/ipc";
 import type { ScoopEvent } from "$lib/types";
 
-export type OpKind = "install" | "uninstall" | "bootstrap" | "preset";
+export type OpKind = "install" | "uninstall" | "update" | "bootstrap" | "preset";
 export type OpState = "running" | "finished" | "errored" | "cancelled";
 
 export type LogLine = {
@@ -35,6 +35,10 @@ class OperationStore {
 
   async runUninstall(app: string): Promise<void> {
     return this.run("uninstall", app);
+  }
+
+  async runUpdate(app: string): Promise<void> {
+    return this.run("update", app);
   }
 
   async runBootstrap(): Promise<void> {
@@ -95,6 +99,9 @@ class OperationStore {
           break;
         case "uninstall":
           await ipc.scoopUninstall(target, channel);
+          break;
+        case "update":
+          await ipc.scoopUpdate(target, channel);
           break;
         case "bootstrap":
           await ipc.scoopBootstrap(channel);

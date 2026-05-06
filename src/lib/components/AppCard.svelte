@@ -10,6 +10,9 @@
     installed != null && installed.version !== app.version && app.version !== "?",
   );
   const ref = $derived(`${app.bucket}/${app.name}`);
+  // Scoop license fields sometimes look like "MIT|https://..."; only keep the
+  // identifier half for display.
+  const licenseLabel = $derived(app.license?.split("|")[0]?.trim() || null);
 
   let acting = $state(false);
 
@@ -18,6 +21,17 @@
     try {
       goto("/logs");
       await operation.runInstall(ref);
+      onChanged?.();
+    } finally {
+      acting = false;
+    }
+  }
+
+  async function update() {
+    acting = true;
+    try {
+      goto("/logs");
+      await operation.runUpdate(app.name);
       onChanged?.();
     } finally {
       acting = false;
@@ -49,9 +63,9 @@
   <footer>
     <div class="meta">
       <span class="version">v{app.version}</span>
-      {#if app.license}
+      {#if licenseLabel}
         <span class="dot-sep">·</span>
-        <span class="license">{app.license}</span>
+        <span class="license">{licenseLabel}</span>
       {/if}
     </div>
 
@@ -64,7 +78,20 @@
       {#if installed?.hold}
         <span class="badge" title="held — scoop unhold to update">held</span>
       {/if}
-      {#if installed}
+
+      {#if installed && updateAvailable && !installed.hold}
+        <button
+          class="card-btn primary"
+          disabled={operation.busy || acting}
+          onclick={update}
+          title="scoop update {app.name}"
+        >
+          Update
+        </button>
+        <button class="card-btn ghost" disabled={operation.busy || acting} onclick={uninstall}>
+          Remove
+        </button>
+      {:else if installed}
         <button class="card-btn" disabled={operation.busy || acting} onclick={uninstall}>
           Uninstall
         </button>
@@ -226,5 +253,16 @@
   .card-btn.primary:hover:not(:disabled) {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
+  }
+
+  .card-btn.ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-dim);
+  }
+
+  .card-btn.ghost:hover:not(:disabled) {
+    background: var(--bg-2);
+    color: var(--text);
   }
 </style>

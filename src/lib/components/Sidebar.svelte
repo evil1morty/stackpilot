@@ -2,13 +2,21 @@
   import { page } from "$app/state";
   import SettingsMenu from "./SettingsMenu.svelte";
 
-  type NavItem = { href: string; label: string; icon: string };
+  type IconName = "grid" | "activity" | "layers" | "terminal";
+
+  type NavItem = {
+    href: string;
+    label: string;
+    icon: IconName;
+    /** Optional Ctrl+number shortcut hint (1..9). */
+    accel?: number;
+  };
 
   const items: NavItem[] = [
-    { href: "/", label: "Catalog", icon: "grid" },
-    { href: "/services", label: "Services", icon: "activity" },
-    { href: "/presets", label: "Presets", icon: "layers" },
-    { href: "/logs", label: "Logs", icon: "terminal" },
+    { href: "/", label: "Packages", icon: "grid", accel: 1 },
+    { href: "/services", label: "Services", icon: "activity", accel: 2 },
+    { href: "/presets", label: "Presets", icon: "layers", accel: 3 },
+    { href: "/logs", label: "Logs", icon: "terminal", accel: 4 },
   ];
 
   function isActive(href: string): boolean {
@@ -29,8 +37,39 @@
   <nav>
     {#each items as item (item.href)}
       <a href={item.href} class="nav-item" class:active={isActive(item.href)}>
-        <span class="dot" aria-hidden="true"></span>
+        <span class="icon" aria-hidden="true">
+          {#if item.icon === "grid"}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1.5" />
+              <rect x="14" y="3" width="7" height="7" rx="1.5" />
+              <rect x="3" y="14" width="7" height="7" rx="1.5" />
+              <rect x="14" y="14" width="7" height="7" rx="1.5" />
+            </svg>
+          {:else if item.icon === "activity"}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
+          {:else if item.icon === "layers"}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2" />
+              <polyline points="2 17 12 22 22 17" />
+              <polyline points="2 12 12 17 22 12" />
+            </svg>
+          {:else if item.icon === "terminal"}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 17 10 11 4 5" />
+              <line x1="12" y1="19" x2="20" y2="19" />
+            </svg>
+          {/if}
+        </span>
         <span class="label">{item.label}</span>
+        {#if item.accel}
+          <span class="accel">⌃{item.accel}</span>
+        {/if}
       </a>
     {/each}
   </nav>
@@ -128,22 +167,40 @@
     color: var(--accent);
   }
 
-  .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 999px;
-    background: var(--text-muted);
-    transition: background 120ms ease;
+  .icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+    transition: color 120ms ease;
     flex-shrink: 0;
   }
 
-  .nav-item:hover .dot {
-    background: var(--text-dim);
+  .nav-item:hover .icon {
+    color: var(--text-dim);
   }
 
-  .nav-item.active .dot {
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+  .nav-item.active .icon {
+    color: var(--accent);
+  }
+
+  .label {
+    flex: 1;
+  }
+
+  .accel {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .nav-item:hover .accel,
+  .nav-item.active .accel {
+    opacity: 1;
   }
 
   .foot {
