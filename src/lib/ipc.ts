@@ -1,5 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { AppEntry, CatalogStats, ScoopEvent, ScoopStatus } from "./types";
+import type {
+  AppEntry,
+  CatalogStats,
+  ScoopEvent,
+  ScoopStatus,
+  ServiceInfo,
+} from "./types";
 
 export type PingResponse = {
   ok: boolean;
@@ -28,4 +34,12 @@ export const ipc = {
   scoopBootstrap: (onEvent: Channel<ScoopEvent>) =>
     invoke<void>("scoop_bootstrap", { onEvent }),
   scoopCancel: () => invoke<boolean>("scoop_cancel"),
+
+  servicesList: () => invoke<ServiceInfo[]>("services_list"),
+  servicesStart: (key: string) => invoke<ServiceInfo>("services_start", { key }),
+  servicesStop: (key: string) => invoke<ServiceInfo>("services_stop", { key }),
+  servicesRestart: (key: string) =>
+    invoke<ServiceInfo>("services_restart", { key }),
+  servicesOpenData: (key: string) =>
+    invoke<void>("services_open_data", { key }),
 };

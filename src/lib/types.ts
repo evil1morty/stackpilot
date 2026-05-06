@@ -43,3 +43,28 @@ export type ScoopEvent =
   | { type: "finished"; payload: { exitCode: number } }
   | { type: "error"; payload: { message: string } };
 
+export type ServiceStatus =
+  | { kind: "stopped" }
+  | { kind: "runningTracked"; pid: number; startedAt: number }
+  | { kind: "runningExternal"; pid: number };
+
+export type ServiceCategory =
+  | "database"
+  | "cache"
+  | "webserver"
+  | "queue"
+  | "search"
+  | "storage";
+
+export type ServiceInfo = {
+  key: string;
+  scoopApp: string;
+  display: string;
+  category: ServiceCategory | string;
+  installed: boolean;
+  status: ServiceStatus;
+  defaultPort: number | null;
+  persistDir: string | null;
+  binPath: string | null;
+};
+
