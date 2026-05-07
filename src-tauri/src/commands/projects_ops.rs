@@ -221,10 +221,12 @@ pub async fn projects_activate(
     if !project.vhosts.is_empty() {
         if let Some(root) = scoop_root() {
             match vhosts::emit(&project, &root) {
-                Ok(paths) => vhosts_written = Some(paths.len()),
+                Ok(outcome) => {
+                    vhosts_written = Some(outcome.written.len());
+                    vhost_warnings.extend(outcome.warnings);
+                }
                 Err(e) => vhost_warnings.push(format!("vhost emit: {e}")),
             }
-            // Make sure nginx.conf includes the stackpilot directory.
             match vhosts::ensure_nginx_include(&root) {
                 Ok(true) => vhost_warnings
                     .push("Patched nginx.conf to include vhosts (backup at nginx.conf.bak)".into()),

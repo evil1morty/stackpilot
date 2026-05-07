@@ -9,6 +9,7 @@ mod projects;
 mod scoop;
 mod scoopsearch;
 mod service_logs;
+mod ssl;
 mod state;
 mod tray;
 mod vhosts;

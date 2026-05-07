@@ -226,6 +226,10 @@
                 spellcheck="false"
                 title="Document root — leave blank to inherit project root"
               />
+              <label class="ssl-toggle" title="Auto-mint a self-signed cert via OpenSSL">
+                <input type="checkbox" bind:checked={vh.ssl} />
+                SSL
+              </label>
               <button class="vh-rm" onclick={() => removeVhost(i)} aria-label="Remove">×</button>
             </div>
           {/each}
@@ -491,6 +495,21 @@
 
   .vhost-row .docroot {
     flex: 1.4;
+  }
+
+  .ssl-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    user-select: none;
+    cursor: pointer;
+  }
+
+  .ssl-toggle input[type="checkbox"] {
+    accent-color: var(--accent);
+    margin: 0;
   }
 
   .vh-rm {
