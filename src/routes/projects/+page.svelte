@@ -82,12 +82,22 @@
         parts.push(`started ${report.started.length}`);
       if (report.failed.length)
         parts.push(`${report.failed.length} failed`);
-      activationToast =
+      if (report.vhostsWritten != null && report.vhostsWritten > 0)
+        parts.push(
+          `${report.vhostsWritten} vhost${report.vhostsWritten === 1 ? "" : "s"} emitted`,
+        );
+      if (report.hostsFileUpdated) parts.push("hosts file updated");
+      let toast =
         parts.length > 0
           ? `${p.name}: ${parts.join(", ")}`
           : `${p.name} is active.`;
+      if (report.vhostWarnings.length) {
+        toast += ` · ${report.vhostWarnings.length} warning${report.vhostWarnings.length === 1 ? "" : "s"}`;
+        console.warn("vhost warnings", report.vhostWarnings);
+      }
+      activationToast = toast;
       await refresh();
-      setTimeout(() => (activationToast = null), 4000);
+      setTimeout(() => (activationToast = null), 6000);
     } catch (e) {
       activationToast = `Error: ${e instanceof Error ? e.message : String(e)}`;
     } finally {

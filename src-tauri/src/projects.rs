@@ -33,9 +33,43 @@ pub struct Project {
     pub env_vars: BTreeMap<String, String>,
     #[serde(default)]
     pub notes: String,
+    /// Pretty-URL bindings. On activate Stackpilot writes a vhost config
+    /// per entry and ensures the host points at 127.0.0.1.
+    #[serde(default)]
+    pub vhosts: Vec<VHost>,
     pub created_at: u64,
     #[serde(default)]
     pub last_active_at: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct VHost {
+    /// Host name without protocol — e.g. `myapp.test`.
+    pub host: String,
+    /// Plain HTTP listening port. 80 by default.
+    #[serde(default = "default_port")]
+    pub port: u16,
+    /// Document root on disk. Defaults to the project's root_dir
+    /// (or `<root_dir>/public` for Laravel-style projects) — UI hint only.
+    #[serde(default)]
+    pub document_root: String,
+    /// Which web server should host this. Right now only "nginx" is
+    /// supported; "apache" + "caddy" are reserved for v0.4.
+    #[serde(default = "default_server")]
+    pub server: String,
+    /// When true, emit ssl_certificate directives + listen 443. Cert is
+    /// generated on activate via OpenSSL (v0.4 — currently no-op).
+    #[serde(default)]
+    pub ssl: bool,
+}
+
+fn default_port() -> u16 {
+    80
+}
+
+fn default_server() -> String {
+    "nginx".to_string()
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -174,6 +208,7 @@ mod tests {
                 services: vec!["redis".into(), "postgresql".into()],
                 env_vars: env,
                 notes: "main project".into(),
+                vhosts: vec![],
                 created_at: 1_700_000_000,
                 last_active_at: None,
             }],

@@ -10,9 +10,12 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::services;
+use crate::hosts_file;
 use crate::known_services;
 use crate::projects;
+use crate::scoop::scoop_root;
 use crate::state::AppState;
+use crate::vhosts;
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +37,8 @@ pub struct ProjectInput {
     pub env_vars: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub notes: String,
+    #[serde(default)]
+    pub vhosts: Vec<projects::VHost>,
 }
 
 fn validate_input(input: &ProjectInput) -> Result<(), String> {
@@ -83,6 +88,7 @@ pub fn projects_create(input: ProjectInput) -> Result<ProjectInfo, String> {
         services: input.services,
         env_vars: input.env_vars,
         notes: input.notes,
+        vhosts: input.vhosts,
         created_at: projects::now(),
         last_active_at: None,
     };
@@ -105,6 +111,7 @@ pub fn projects_update(key: String, input: ProjectInput) -> Result<ProjectInfo, 
     project.services = input.services;
     project.env_vars = input.env_vars;
     project.notes = input.notes;
+    project.vhosts = input.vhosts;
     let cloned = project.clone();
     projects::save(&file)?;
     Ok(to_info(cloned, &file.active_key))
@@ -132,6 +139,14 @@ pub struct ActivationReport {
     pub started: Vec<String>,
     pub failed: Vec<ServiceFailure>,
     pub project: ProjectInfo,
+    /// Number of vhost config files written. None if nginx isn't installed.
+    pub vhosts_written: Option<usize>,
+    /// True if the hosts file was actually mutated (UAC prompt fired).
+    /// False if no change was needed.
+    pub hosts_file_updated: bool,
+    /// Soft warnings collected during vhost emission (nginx not installed,
+    /// nginx.conf missing, etc) — surfaced to the user but non-fatal.
+    pub vhost_warnings: Vec<String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -197,6 +212,45 @@ pub async fn projects_activate(
         }
     }
 
+    // Phase 3 — emit vhost configs + sync hosts file. Best-effort:
+    // failures here become soft warnings, the project still activates.
+    let mut vhost_warnings: Vec<String> = Vec::new();
+    let mut vhosts_written: Option<usize> = None;
+    let mut hosts_file_updated = false;
+
+    if !project.vhosts.is_empty() {
+        if let Some(root) = scoop_root() {
+            match vhosts::emit(&project, &root) {
+                Ok(paths) => vhosts_written = Some(paths.len()),
+                Err(e) => vhost_warnings.push(format!("vhost emit: {e}")),
+            }
+            // Make sure nginx.conf includes the stackpilot directory.
+            match vhosts::ensure_nginx_include(&root) {
+                Ok(true) => vhost_warnings
+                    .push("Patched nginx.conf to include vhosts (backup at nginx.conf.bak)".into()),
+                Ok(false) => {}
+                Err(e) => vhost_warnings.push(format!("nginx.conf patch: {e}")),
+            }
+        } else {
+            vhost_warnings.push("Scoop not installed — skipped vhost emission".into());
+        }
+
+        // Sync hosts file. We do this even if vhost emission failed —
+        // resolving the host is independent of nginx serving it.
+        let aggregated = collect_active_hosts(&file, Some(&project.key));
+        match hosts_file::replace_block(&aggregated) {
+            Ok(true) => hosts_file_updated = true,
+            Ok(false) => {}
+            Err(e) => vhost_warnings.push(format!("hosts file: {e}")),
+        }
+
+        // Reload nginx if it's running. Failure is soft — user can manually
+        // restart from the Services page if needed.
+        if state.tracked.lock().contains_key("nginx") {
+            let _ = services::services_restart("nginx".to_string(), state.clone()).await;
+        }
+    }
+
     // Mark project as active + bump last_active_at.
     file.projects[project_idx].last_active_at = Some(projects::now());
     file.active_key = Some(project.key.clone());
@@ -209,7 +263,33 @@ pub async fn projects_activate(
         started,
         failed,
         project: to_info(updated, &active_key),
+        vhosts_written,
+        hosts_file_updated,
+        vhost_warnings,
     })
+}
+
+/// Hosts to keep in the hosts-file managed block. The currently-activating
+/// project always contributes; everyone else contributes only if they were
+/// last active recently — but for v0.3 we keep it simple: just the active
+/// project.
+fn collect_active_hosts(file: &projects::ProjectsFile, also: Option<&str>) -> Vec<String> {
+    let mut out = Vec::new();
+    let key_filter = match (file.active_key.as_deref(), also) {
+        (Some(a), _) => Some(a.to_string()),
+        (None, Some(b)) => Some(b.to_string()),
+        _ => None,
+    };
+    let Some(key) = key_filter else { return out };
+    if let Some(p) = file.projects.iter().find(|p| p.key == key) {
+        for vh in &p.vhosts {
+            if !vh.host.trim().is_empty() {
+                out.push(vh.host.clone());
+            }
+        }
+    }
+    let _ = also;
+    out
 }
 
 /// Open a new terminal window at the project's root_dir with the project's
@@ -321,6 +401,16 @@ pub async fn projects_deactivate(state: State<'_, AppState>) -> Result<Vec<Strin
             {
                 stopped.push(svc_key.clone());
             }
+        }
+
+        // Drop our vhost configs + hosts entries for this project. Best-effort.
+        if !p.vhosts.is_empty() {
+            if let Some(root) = scoop_root() {
+                let _ = vhosts::cleanup(&p, &root);
+            }
+            // Empty list strips our managed block entirely — no UAC prompt
+            // unless the file actually had stackpilot entries.
+            let _ = hosts_file::replace_block(&[]);
         }
     }
     Ok(stopped)

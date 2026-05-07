@@ -98,6 +98,15 @@ export type ConfigFileInfo = {
   volatile: boolean;
 };
 
+export type VHost = {
+  host: string;
+  port: number;
+  documentRoot: string;
+  /** Web server that should host this vhost — `nginx` for now. */
+  server: string;
+  ssl: boolean;
+};
+
 export type Project = {
   key: string;
   name: string;
@@ -105,6 +114,7 @@ export type Project = {
   services: string[];
   envVars: Record<string, string>;
   notes: string;
+  vhosts: VHost[];
   createdAt: number;
   lastActiveAt: number | null;
 };
@@ -117,6 +127,7 @@ export type ProjectInput = {
   services?: string[];
   envVars?: Record<string, string>;
   notes?: string;
+  vhosts?: VHost[];
 };
 
 export type ServiceFailure = {
@@ -129,6 +140,9 @@ export type ActivationReport = {
   started: string[];
   failed: ServiceFailure[];
   project: ProjectInfo;
+  vhostsWritten: number | null;
+  hostsFileUpdated: boolean;
+  vhostWarnings: string[];
 };
 
 export type PresetApp = {

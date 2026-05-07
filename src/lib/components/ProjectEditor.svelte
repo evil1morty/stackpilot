@@ -3,6 +3,8 @@
   import { ipc } from "$lib/ipc";
   import type { ProjectInfo, ServiceInfo } from "$lib/types";
 
+  import type { VHost } from "$lib/types";
+
   let {
     initial,
     onClose,
@@ -28,6 +30,28 @@
   let envPairs = $state<Array<{ k: string; v: string }>>(
     Object.entries(initial?.envVars ?? {}).map(([k, v]) => ({ k, v })),
   );
+  /* svelte-ignore state_referenced_locally */
+  let vhosts = $state<VHost[]>(
+    (initial?.vhosts ?? []).map((v) => ({ ...v })),
+  );
+
+  function addVhost() {
+    const suggested = name.trim().toLowerCase().replace(/\s+/g, "-") || "myapp";
+    vhosts = [
+      ...vhosts,
+      {
+        host: `${suggested}.test`,
+        port: 80,
+        documentRoot: "",
+        server: "nginx",
+        ssl: false,
+      },
+    ];
+  }
+
+  function removeVhost(i: number) {
+    vhosts = vhosts.filter((_, idx) => idx !== i);
+  }
 
   let availableServices = $state<ServiceInfo[]>([]);
   let saving = $state(false);
@@ -69,6 +93,15 @@
         services: selectedServices,
         envVars,
         notes: notes.trim(),
+        vhosts: vhosts
+          .filter((v) => v.host.trim() !== "")
+          .map((v) => ({
+            host: v.host.trim(),
+            port: Number(v.port) || 80,
+            documentRoot: v.documentRoot.trim(),
+            server: v.server || "nginx",
+            ssl: !!v.ssl,
+          })),
       };
       const next = initial
         ? await ipc.projectsUpdate(initial.key, input)
@@ -161,6 +194,42 @@
             </div>
           {/each}
           <button class="env-add" onclick={addEnvPair}>+ Add variable</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="label">
+          Pretty URLs <span class="muted">(needs nginx — applied on Activate)</span>
+        </span>
+        <div class="vhost-list">
+          {#each vhosts as vh, i (i)}
+            <div class="vhost-row">
+              <input
+                type="text"
+                bind:value={vh.host}
+                placeholder="myapp.test"
+                spellcheck="false"
+              />
+              <span class="eq">:</span>
+              <input
+                type="number"
+                class="port"
+                bind:value={vh.port}
+                min="1"
+                max="65535"
+              />
+              <input
+                type="text"
+                class="docroot"
+                bind:value={vh.documentRoot}
+                placeholder={rootDir || "(use root_dir)"}
+                spellcheck="false"
+                title="Document root — leave blank to inherit project root"
+              />
+              <button class="vh-rm" onclick={() => removeVhost(i)} aria-label="Remove">×</button>
+            </div>
+          {/each}
+          <button class="vh-add" onclick={addVhost}>+ Add pretty URL</button>
         </div>
       </div>
 
@@ -377,7 +446,8 @@
     color: var(--danger);
   }
 
-  .env-add {
+  .env-add,
+  .vh-add {
     align-self: flex-start;
     background: transparent;
     border: 1px dashed var(--border-strong);
@@ -388,9 +458,55 @@
     cursor: pointer;
   }
 
-  .env-add:hover {
+  .env-add:hover,
+  .vh-add:hover {
     background: var(--bg-2);
     color: var(--text);
+  }
+
+  .vhost-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .vhost-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .vhost-row input[type="text"] {
+    flex: 1;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+  }
+
+  .vhost-row .port {
+    width: 72px;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .vhost-row .docroot {
+    flex: 1.4;
+  }
+
+  .vh-rm {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .vh-rm:hover {
+    background: var(--bg-2);
+    color: var(--danger);
   }
 
   .err {

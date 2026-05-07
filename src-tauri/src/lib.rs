@@ -1,6 +1,7 @@
 mod catalog;
 mod commands;
 mod health;
+mod hosts_file;
 mod known_services;
 mod persistence;
 mod presets;
@@ -10,6 +11,7 @@ mod scoopsearch;
 mod service_logs;
 mod state;
 mod tray;
+mod vhosts;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
