@@ -3,6 +3,7 @@
   import { ipc } from "$lib/ipc";
   import type { ServiceInfo } from "$lib/types";
   import ConfigEditor from "./ConfigEditor.svelte";
+  import ContextMenu, { type ContextMenuItem } from "./ContextMenu.svelte";
 
   let {
     service,
@@ -13,6 +14,7 @@
   let actionError = $state<string | null>(null);
 
   let configOpen = $state(false);
+  let menu = $state<{ x: number; y: number } | null>(null);
 
   const isRunning = $derived(service.status.kind !== "stopped");
   const isOurs = $derived(service.status.kind === "runningTracked");
@@ -64,9 +66,49 @@
   function gotoLogs() {
     goto(`/logs?service=${encodeURIComponent(service.key)}`);
   }
+
+  function openMenu(e: MouseEvent) {
+    e.preventDefault();
+    menu = { x: e.clientX, y: e.clientY };
+  }
+
+  const menuItems: ContextMenuItem[] = $derived.by(() => {
+    if (!service.installed) {
+      return [
+        { kind: "item", label: "Install via Scoop", action: gotoCatalog },
+      ] satisfies ContextMenuItem[];
+    }
+    const stopped = service.status.kind === "stopped";
+    return [
+      stopped
+        ? {
+            kind: "item",
+            label: "Start",
+            action: () => call("start"),
+            disabled: busy !== null,
+          }
+        : {
+            kind: "item",
+            label: "Stop",
+            action: () => call("stop"),
+            danger: true,
+            disabled: busy !== null,
+          },
+      {
+        kind: "item",
+        label: "Restart",
+        action: () => call("restart"),
+        disabled: busy !== null || stopped || !isOurs,
+      },
+      { kind: "divider" },
+      { kind: "item", label: "Open folder", action: openData },
+      { kind: "item", label: "Edit configs…", action: () => (configOpen = true) },
+      { kind: "item", label: "View logs", action: gotoLogs },
+    ] satisfies ContextMenuItem[];
+  });
 </script>
 
-<article class="card" class:running={isRunning}>
+<article class="card" class:running={isRunning} oncontextmenu={openMenu}>
   <header>
     <div class="title-block">
       <h3>{service.display}</h3>
@@ -151,6 +193,15 @@
       {service}
       onClose={() => (configOpen = false)}
       onSaved={(next) => onChanged(next)}
+    />
+  {/if}
+
+  {#if menu}
+    <ContextMenu
+      x={menu.x}
+      y={menu.y}
+      items={menuItems}
+      onClose={() => (menu = null)}
     />
   {/if}
 </article>

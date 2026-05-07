@@ -3,6 +3,7 @@
   import { ipc } from "$lib/ipc";
   import type { ProjectInfo } from "$lib/types";
   import ProjectEditor from "$lib/components/ProjectEditor.svelte";
+  import ContextMenu, { type ContextMenuItem } from "$lib/components/ContextMenu.svelte";
 
   let projects = $state<ProjectInfo[]>([]);
   let loading = $state(true);
@@ -10,6 +11,34 @@
   let editing = $state<ProjectInfo | null | undefined>(undefined);
   let activating = $state<string | null>(null);
   let activationToast = $state<string | null>(null);
+  let menu = $state<{ x: number; y: number; project: ProjectInfo } | null>(null);
+
+  function openMenu(e: MouseEvent, p: ProjectInfo) {
+    e.preventDefault();
+    menu = { x: e.clientX, y: e.clientY, project: p };
+  }
+
+  function buildMenuItems(p: ProjectInfo): ContextMenuItem[] {
+    return [
+      p.isActive
+        ? {
+            kind: "item",
+            label: "Deactivate",
+            action: () => deactivate(p),
+            disabled: activating !== null,
+          }
+        : {
+            kind: "item",
+            label: "Activate",
+            action: () => activate(p),
+            disabled: activating !== null || p.services.length === 0,
+          },
+      { kind: "divider" },
+      { kind: "item", label: "Edit project", action: () => (editing = p) },
+      { kind: "divider" },
+      { kind: "item", label: "Delete", danger: true, action: () => remove(p) },
+    ];
+  }
 
   onMount(async () => {
     await refresh();
@@ -122,7 +151,11 @@
   {:else}
     <div class="grid">
       {#each projects as p (p.key)}
-        <article class="card" class:active={p.isActive}>
+        <article
+          class="card"
+          class:active={p.isActive}
+          oncontextmenu={(e) => openMenu(e, p)}
+        >
           <header>
             <div class="title-block">
               <h3>{p.name}</h3>
@@ -191,6 +224,15 @@
       editing = undefined;
       projects = [next, ...projects.filter((p) => p.key !== next.key)];
     }}
+  />
+{/if}
+
+{#if menu}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    items={buildMenuItems(menu.project)}
+    onClose={() => (menu = null)}
   />
 {/if}
 
