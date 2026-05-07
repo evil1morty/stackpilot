@@ -322,6 +322,42 @@ pub(crate) async fn services_start_with_env(
     // handle without killing the process.
     drop(child);
 
+    // Post-spawn verification: poll for up to ~3 s checking that our PID
+    // is the one bound to the service's port. If the process exits early
+    // (postgres "pre-existing shared memory block", redis bind error, etc.)
+    // we surface the last few log lines instead of falsely reporting OK.
+    if let Some(port) = svc.default_port {
+        let verified = verify_started(pid, port).await;
+        if !verified {
+            let tail = service_logs::tail(svc.key, 12)
+                .ok()
+                .map(|lines| {
+                    lines
+                        .into_iter()
+                        .filter(|l| !l.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+
+            // Best-effort taskkill in case the process is still alive but
+            // not bound (e.g. infinite-recovery loop).
+            let mut kill = Command::new("taskkill");
+            kill.args(["/T", "/F", "/PID", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(windows)]
+            {
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                kill.creation_flags(CREATE_NO_WINDOW);
+            }
+            let _ = kill.status().await;
+
+            let hint = startup_failure_hint(svc, &tail);
+            return Err(format_startup_failure(svc, &tail, hint.as_deref()));
+        }
+    }
+
     state.tracked.lock().insert(
         svc.key.to_string(),
         TrackedService {
@@ -333,6 +369,63 @@ pub(crate) async fn services_start_with_env(
     state.persist_tracked();
 
     Ok(build_info_for(svc, state))
+}
+
+/// Wait up to ~3 seconds for the spawned PID to bind the expected port.
+/// Returns true on success, false if the process never bound (likely died
+/// or is in a recovery loop).
+async fn verify_started(pid: u32, port: u16) -> bool {
+    use std::time::Duration;
+    for _ in 0..15 {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        if pid_on_port(port) == Some(pid) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detect known failure signatures in the log tail and return a friendly
+/// hint pointing at the fix.
+fn startup_failure_hint(svc: &KnownService, tail: &str) -> Option<String> {
+    let lower = tail.to_lowercase();
+    if lower.contains("pre-existing shared memory block is still in use") {
+        return Some(format!(
+            "An older {} instance is still running. Open Task Manager → kill any \
+             postgres.exe processes, then click Start again.",
+            svc.display
+        ));
+    }
+    if lower.contains("address already in use") || lower.contains("bind: address already in use") {
+        return Some(format!(
+            "Something else is bound to port {}. Stop the other process and retry.",
+            svc.default_port.unwrap_or(0)
+        ));
+    }
+    if lower.contains("permission denied") {
+        return Some("Permission denied — check the service's data directory permissions.".into());
+    }
+    if lower.contains("could not lock file") {
+        return Some(format!(
+            "{}'s data directory is locked by another process. Make sure no other \
+             instance is running.",
+            svc.display
+        ));
+    }
+    None
+}
+
+fn format_startup_failure(svc: &KnownService, tail: &str, hint: Option<&str>) -> String {
+    let mut msg = format!("{} failed to start.", svc.display);
+    if let Some(h) = hint {
+        msg.push_str("\n\n");
+        msg.push_str(h);
+    }
+    if !tail.trim().is_empty() {
+        msg.push_str("\n\nLast log lines:\n");
+        msg.push_str(tail);
+    }
+    msg
 }
 
 #[tauri::command]

@@ -162,7 +162,20 @@
   </div>
 
   {#if actionError}
-    <p class="err">{actionError}</p>
+    <div class="err-block">
+      <div class="err-head">
+        <strong>Couldn't start.</strong>
+        <button
+          class="err-close"
+          onclick={() => (actionError = null)}
+          aria-label="Dismiss"
+        >×</button>
+      </div>
+      <pre>{actionError}</pre>
+      <div class="err-actions">
+        <button class="err-link" onclick={gotoLogs}>Open full log →</button>
+      </div>
+    </div>
   {/if}
 
   <footer>
@@ -329,13 +342,77 @@
     font-style: italic;
   }
 
-  .err {
-    margin: 0;
-    padding: 6px 10px;
+  .err-block {
     background: var(--danger-soft);
-    color: var(--danger);
+    border: 1px solid rgba(248, 113, 113, 0.25);
     border-radius: var(--radius-sm);
+    padding: 8px 10px 6px 10px;
     font-size: 11.5px;
+    color: var(--danger);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .err-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .err-close {
+    background: transparent;
+    border: none;
+    color: var(--danger);
+    font-size: 16px;
+    line-height: 1;
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    padding: 0;
+    cursor: pointer;
+    opacity: 0.7;
+  }
+
+  .err-close:hover {
+    opacity: 1;
+    background: rgba(248, 113, 113, 0.15);
+  }
+
+  .err-block pre {
+    margin: 0;
+    padding: 6px 8px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow-y: auto;
+  }
+
+  .err-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .err-link {
+    background: transparent;
+    border: none;
+    color: var(--danger);
+    font-size: 11px;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .err-link:hover {
+    color: var(--text);
   }
 
   footer {
