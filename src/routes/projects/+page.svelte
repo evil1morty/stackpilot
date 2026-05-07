@@ -33,11 +33,26 @@
             action: () => activate(p),
             disabled: activating !== null || p.services.length === 0,
           },
+      {
+        kind: "item",
+        label: "Open terminal",
+        action: () => openTerminal(p),
+        disabled: !p.rootDir,
+      },
       { kind: "divider" },
       { kind: "item", label: "Edit project", action: () => (editing = p) },
       { kind: "divider" },
       { kind: "item", label: "Delete", danger: true, action: () => remove(p) },
     ];
+  }
+
+  async function openTerminal(p: ProjectInfo) {
+    try {
+      await ipc.projectsOpenTerminal(p.key);
+    } catch (e) {
+      activationToast = `Error: ${e instanceof Error ? e.message : String(e)}`;
+      setTimeout(() => (activationToast = null), 4000);
+    }
   }
 
   onMount(async () => {
@@ -205,6 +220,9 @@
                 >
                   {activating === p.key ? "Activating…" : "Activate"}
                 </button>
+              {/if}
+              {#if p.rootDir}
+                <button class="btn-mini ghost" onclick={() => openTerminal(p)}>Terminal</button>
               {/if}
               <button class="btn-mini ghost" onclick={() => (editing = p)}>Edit</button>
               <button class="btn-mini ghost danger" onclick={() => remove(p)}>Delete</button>

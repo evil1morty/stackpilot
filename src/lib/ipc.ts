@@ -87,6 +87,8 @@ export const ipc = {
     invoke<ActivationReport>("projects_activate", { key }),
   projectsDeactivate: () =>
     invoke<string[]>("projects_deactivate"),
+  projectsOpenTerminal: (key: string) =>
+    invoke<void>("projects_open_terminal", { key }),
 
   setCloseToTray: (enabled: boolean) =>
     invoke<void>("set_close_to_tray", { enabled }),

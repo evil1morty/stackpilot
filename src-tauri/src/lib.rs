@@ -16,7 +16,7 @@ use commands::ping::ping;
 use commands::presets_ops::{presets_apply, presets_list};
 use commands::projects_ops::{
     projects_activate, projects_create, projects_deactivate, projects_delete, projects_list,
-    projects_update,
+    projects_open_terminal, projects_update,
 };
 use commands::scoop_ops::{
     scoop_bootstrap, scoop_cancel, scoop_install, scoop_uninstall, scoop_update,
@@ -68,6 +68,7 @@ pub fn run() {
             projects_delete,
             projects_activate,
             projects_deactivate,
+            projects_open_terminal,
             set_close_to_tray,
             get_close_to_tray,
             quit_app,

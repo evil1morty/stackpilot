@@ -212,6 +212,96 @@ pub async fn projects_activate(
     })
 }
 
+/// Open a new terminal window at the project's root_dir with the project's
+/// env_vars applied. Tries Windows Terminal first, falls back to plain
+/// PowerShell. Both inherit env vars from the spawned cmd-shim, so the user
+/// gets DB_URL etc set automatically.
+#[tauri::command]
+pub fn projects_open_terminal(key: String) -> Result<(), String> {
+    let file = projects::load();
+    let project = file
+        .projects
+        .iter()
+        .find(|p| p.key == key)
+        .ok_or_else(|| format!("project not found: {key}"))?
+        .clone();
+
+    let cwd = if project.root_dir.trim().is_empty() {
+        dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."))
+    } else {
+        std::path::PathBuf::from(&project.root_dir)
+    };
+    if !cwd.exists() {
+        return Err(format!(
+            "root directory does not exist: {}",
+            cwd.display()
+        ));
+    }
+
+    let cwd_str = cwd.display().to_string();
+
+    // Prefer Windows Terminal if it's on PATH; users who installed it via
+    // Scoop or the Store will get a nicer experience.
+    let use_wt = which("wt").is_some();
+
+    let mut cmd = std::process::Command::new("cmd");
+    if use_wt {
+        // wt -d <dir> opens a new tab at the requested directory in the
+        // user's default profile (PowerShell or pwsh).
+        cmd.args(["/c", "start", "", "wt", "-d", &cwd_str]);
+    } else {
+        // Plain PowerShell with -NoExit so the window stays open after `cd`.
+        // Single-quoting works because we only embed file paths and we
+        // double up any embedded apostrophes for safety.
+        let cd = format!(
+            "Set-Location -LiteralPath '{}'",
+            cwd_str.replace('\'', "''")
+        );
+        cmd.args([
+            "/c",
+            "start",
+            "Stackpilot terminal",
+            "powershell.exe",
+            "-NoExit",
+            "-Command",
+            &cd,
+        ]);
+    }
+
+    for (k, v) in &project.env_vars {
+        cmd.env(k, v);
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .stdin(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to launch terminal: {e}"))?;
+
+    Ok(())
+}
+
+/// Tiny `which` for Windows: probes PATH for `<name>.exe` and `<name>.cmd`.
+fn which(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        for ext in &["exe", "cmd", "bat"] {
+            let candidate = dir.join(format!("{name}.{ext}"));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
 #[tauri::command]
 pub async fn projects_deactivate(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     let mut file = projects::load();
