@@ -9,6 +9,7 @@ mod scoop;
 mod scoopsearch;
 mod service_logs;
 mod state;
+mod tray;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
@@ -25,6 +26,7 @@ use commands::services::{
     services_open_data, services_open_path, services_restart, services_start, services_stop,
     services_tail_log,
 };
+use commands::settings::{get_close_to_tray, quit_app, set_close_to_tray};
 use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,6 +34,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::load_from_disk())
+        .setup(|app| {
+            tray::install(app)?;
+            Ok(())
+        })
+        .on_window_event(|window, event| tray::on_window_event(window, event))
         .invoke_handler(tauri::generate_handler![
             ping,
             catalog_list,
@@ -61,6 +68,9 @@ pub fn run() {
             projects_delete,
             projects_activate,
             projects_deactivate,
+            set_close_to_tray,
+            get_close_to_tray,
+            quit_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

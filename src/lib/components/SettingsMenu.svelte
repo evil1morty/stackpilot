@@ -1,11 +1,29 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { ipc } from "$lib/ipc";
   import { theme, type ThemePref } from "$lib/stores/theme.svelte";
+
+  const CLOSE_TO_TRAY_KEY = "stackpilot.closeToTray";
 
   let open = $state(false);
   let aboutOpen = $state(false);
   let appVersion = $state<string>("");
+  let closeToTray = $state(true);
+
+  onMount(async () => {
+    const stored = localStorage.getItem(CLOSE_TO_TRAY_KEY);
+    if (stored != null) {
+      closeToTray = stored === "true";
+    }
+    // Mirror to Rust so the close handler reads the same value.
+    try {
+      await ipc.setCloseToTray(closeToTray);
+    } catch {
+      // pass — IPC might not be ready yet during first render
+    }
+  });
 
   $effect(() => {
     if (aboutOpen && !appVersion) {
@@ -27,6 +45,24 @@
 
   function setTheme(p: ThemePref) {
     theme.set(p);
+  }
+
+  async function toggleCloseToTray() {
+    closeToTray = !closeToTray;
+    localStorage.setItem(CLOSE_TO_TRAY_KEY, String(closeToTray));
+    try {
+      await ipc.setCloseToTray(closeToTray);
+    } catch {
+      // ignore — best-effort
+    }
+  }
+
+  async function quit() {
+    try {
+      await ipc.quitApp();
+    } catch {
+      window.close();
+    }
   }
 </script>
 
@@ -66,12 +102,25 @@
 
       <div class="divider"></div>
 
+      <button class="row toggle" onclick={toggleCloseToTray}>
+        <span>Close to tray</span>
+        <span class="check" class:on={closeToTray} aria-hidden="true">
+          {#if closeToTray}✓{/if}
+        </span>
+      </button>
+
+      <div class="divider"></div>
+
       <button class="row" onclick={() => { aboutOpen = true; open = false; }}>
         About Stackpilot
       </button>
       <button class="row" onclick={() => openUrl("https://scoop.sh")}>
         Scoop docs
       </button>
+
+      <div class="divider"></div>
+
+      <button class="row danger" onclick={quit}>Quit Stackpilot</button>
     </div>
   {/if}
 </div>
@@ -213,6 +262,40 @@
   .row:hover {
     background: var(--bg-3);
     color: var(--text);
+  }
+
+  .row.toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .check {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border-strong);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--bg-0);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .check.on {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .row.danger {
+    color: var(--danger);
+  }
+
+  .row.danger:hover {
+    background: var(--danger-soft);
+    color: var(--danger);
   }
 
   .overlay {

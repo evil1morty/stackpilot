@@ -4,3 +4,4 @@ pub mod presets_ops;
 pub mod projects_ops;
 pub mod scoop_ops;
 pub mod services;
+pub mod settings;

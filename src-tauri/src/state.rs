@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use parking_lot::Mutex;
 
@@ -32,6 +32,9 @@ pub struct AppState {
     /// (e.g. `presets_apply`) snapshot it before starting and check before
     /// every step to detect that the user pressed Cancel.
     pub cancellation_gen: AtomicU64,
+    /// When true, closing the main window hides it to the tray instead of
+    /// exiting. Synced from the frontend Settings menu via IPC.
+    pub close_to_tray: AtomicBool,
 }
 
 impl AppState {
@@ -64,6 +67,7 @@ impl AppState {
             running_pid: Mutex::new(None),
             tracked: Mutex::new(tracked),
             cancellation_gen: AtomicU64::new(0),
+            close_to_tray: AtomicBool::new(true),
         }
     }
 

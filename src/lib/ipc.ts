@@ -87,4 +87,9 @@ export const ipc = {
     invoke<ActivationReport>("projects_activate", { key }),
   projectsDeactivate: () =>
     invoke<string[]>("projects_deactivate"),
+
+  setCloseToTray: (enabled: boolean) =>
+    invoke<void>("set_close_to_tray", { enabled }),
+  getCloseToTray: () => invoke<boolean>("get_close_to_tray"),
+  quitApp: () => invoke<void>("quit_app"),
 };
