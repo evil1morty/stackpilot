@@ -4,6 +4,7 @@
   import { ipc } from "$lib/ipc";
   import { operation } from "$lib/stores/operation.svelte";
   import type { ServiceInfo, ServiceLog } from "$lib/types";
+  import AnsiText from "$lib/components/AnsiText.svelte";
 
   type Source = { kind: "operation" } | { kind: "service"; key: string };
 
@@ -200,7 +201,7 @@
             <span class="prefix">
               {#if line.kind === "stderr"}!{:else if line.kind === "system"}#{:else}&gt;{/if}
             </span>
-            <span class="text">{line.text || " "}</span>
+            <span class="text"><AnsiText text={line.text} /></span>
           </div>
         {/each}
       </div>
@@ -259,7 +260,7 @@
         {#each serviceLog.lines as line, i (i)}
           <div class="line stdout">
             <span class="prefix">&gt;</span>
-            <span class="text">{line || " "}</span>
+            <span class="text"><AnsiText text={line} /></span>
           </div>
         {/each}
       </div>

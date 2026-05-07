@@ -1,8 +1,15 @@
 <script lang="ts">
   import { page } from "$app/state";
   import SettingsMenu from "./SettingsMenu.svelte";
+  import { theme } from "$lib/stores/theme.svelte";
 
   type IconName = "grid" | "activity" | "layers" | "folder" | "terminal";
+
+  function cycleTheme() {
+    // Quick toggle between dark and light. "system" stays available
+    // through the Settings menu segment for users who want it.
+    theme.set(theme.resolved === "dark" ? "light" : "dark");
+  }
 
   type NavItem = {
     href: string;
@@ -76,6 +83,27 @@
   </nav>
 
   <div class="foot">
+    <button
+      class="theme-toggle"
+      onclick={cycleTheme}
+      aria-label="Toggle theme"
+      title={theme.resolved === "dark" ? "Switch to light" : "Switch to dark"}
+    >
+      {#if theme.resolved === "dark"}
+        <!-- sun icon: shown while in dark mode (click → go light) -->
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+      {:else}
+        <!-- moon icon: shown while in light mode (click → go dark) -->
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      {/if}
+    </button>
     <SettingsMenu />
   </div>
 </aside>
@@ -196,5 +224,25 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .theme-toggle {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 120ms ease;
+  }
+
+  .theme-toggle:hover {
+    background: var(--bg-2);
+    color: var(--text);
   }
 </style>
