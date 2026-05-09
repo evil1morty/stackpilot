@@ -5,6 +5,87 @@ All notable changes to Stackpilot are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-09
+
+Performance + correctness pass focused on long-term maintainability and
+the start/stop user flow. No new features.
+
+### Fixed
+
+- **`service_logs::tail` partial-line drop**: when reading was truncated
+  by the 64 KB window the wrong end was being trimmed, so the last line
+  was dropped instead of the (possibly half-record) first line.
+- **TOCTOU on `running_pid`** across scoop install/update/uninstall/
+  bootstrap and presets_apply. Two concurrent invokes could both pass
+  the busy check. Replaced with an `OpSlot` RAII guard that reserves
+  the slot atomically and a single shared one across multi-step preset
+  applies.
+- **TOCTOU on `services_start`**: two concurrent same-key starts could
+  both run `init_step` (Postgres `initdb` corrupting the data dir).
+  Added `state.starting` set + `StartReservation` guard locking
+  tracked, starting, and the port check together.
+- **`services_stop` mid-start race**: refuses with a clear error when a
+  start is in flight so it can't taskkill a child the start path
+  hasn't yet registered.
+- **`services_restart`** now surfaces both stop and start errors when
+  the start step fails — previously only the start error was shown.
+- **`scoop_cancel` slot release**: used to `take()` the slot, which let
+  a concurrent op slip in before the in-flight op had unwound. Now
+  peeks + bumps cancellation_gen + taskkills; the OpSlot drop on
+  natural exit handles release.
+- **`validate_config_path`** uses `dunce::canonicalize` and walks the
+  deepest existing ancestor, so symlinks/junctions can no longer escape
+  the Scoop root.
+- **`PortMap::snapshot` failure** now logs + falls back to per-port
+  probes instead of silently making every service look stopped.
+- Redundant frontend race: home services + logs service-tail effects
+  re-check their cancellation flag after the awaited IPC resolves.
+
+### Performance
+
+- Single shared `reqwest::Client` across health probes + scoopsearch
+  (was building TLS state per call).
+- `CatalogCache` hands out `Arc<Vec<AppEntry>>` instead of cloning the
+  3,800-entry vector on every catalog_list keystroke.
+- `services_list` takes one `GetExtendedTcpTable` snapshot and reuses
+  it across sweep + per-row status + health staleness check (was
+  hitting the kernel ~3× per service).
+- `scoop_root()` cached for the process lifetime; invalidated on
+  `scoop_bootstrap` and `catalog_refresh`.
+- Operation log appends switch from O(n²) spread to in-place push +
+  splice-trim. Long installs no longer stall the UI.
+- Polling pauses while document is hidden (window minimised to tray):
+  services list (2.5 s) and service-log tail (1.5 s).
+- `services_tail_log` accepts `since_size`; returns `lines:[]` for an
+  idle service so the frontend skips the re-render.
+- 30-minute wall-clock watchdog on the scoop subprocess so a hung
+  install can't latch `running_pid` forever.
+
+### Memory leaks fixed
+
+- `service_logs::reap_orphans` removes log files for uninstalled
+  services on every services_list tail.
+- `ssl::reap_orphans` removes cert + key files for hosts no longer
+  referenced by any project on projects_update / projects_delete.
+
+### Maintenance
+
+- New `crate::winutil` (`hide_console_{tokio,std}`, PATHEXT-aware
+  `which`) and `crate::http` (shared client) modules consolidate code
+  duplicated across spawn sites and HTTP callers.
+- scoop install/update/uninstall collapse into one `run_scoop_app_op`.
+- `validate_app_ref` length cap at 128 chars.
+- `eprintln!` → `log::warn!`; `env_logger` initialised at startup.
+- Rotating config-write backups (`<path>.{1,2,3}.bak`) instead of
+  clobbering a single `.bak` on every save; no-op writes are skipped
+  entirely.
+- Cargo.toml + package.json + tauri.conf.json metadata aligned with
+  the actual project: 0.3.1, real description, MIT license.
+
+### Tests
+
+45 unit tests pass; svelte-check 0/0/0; release build green.
+
 ## [0.3.0] — 2026-05-07
 
 Five Laragon-inspired UX wins. Stays-in-tray when closed, right-click
@@ -147,7 +228,8 @@ tree-kill cancellation, theme toggle, GitHub Actions release pipeline.
   confirms port 6379 binds with the spawned PID, kills via
   `taskkill /T /F /PID`, and verifies the port released
 
-[Unreleased]: https://github.com/USER/stackpilot/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/USER/stackpilot/releases/tag/v0.3.0
-[0.2.0]: https://github.com/USER/stackpilot/releases/tag/v0.2.0
-[0.1.0]: https://github.com/USER/stackpilot/releases/tag/v0.1.0
+[Unreleased]: https://github.com/evil1morty/stackpilot/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/evil1morty/stackpilot/releases/tag/v0.3.1
+[0.3.0]: https://github.com/evil1morty/stackpilot/releases/tag/v0.3.0
+[0.2.0]: https://github.com/evil1morty/stackpilot/releases/tag/v0.2.0
+[0.1.0]: https://github.com/evil1morty/stackpilot/releases/tag/v0.1.0

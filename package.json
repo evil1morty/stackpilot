@@ -1,6 +1,6 @@
 {
   "name": "stackpilot",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Modern Windows GUI for browsing, installing, and running dev services via Scoop.",
   "type": "module",
   "scripts": {
