@@ -73,7 +73,7 @@ pub fn load() -> PersistedState {
 pub fn save(state: &PersistedState) {
     let dir = state_dir();
     if let Err(e) = fs::create_dir_all(&dir) {
-        eprintln!("stackpilot: cannot create state dir {}: {e}", dir.display());
+        log::warn!("cannot create state dir {}: {e}", dir.display());
         return;
     }
     let path = state_file();
@@ -82,17 +82,17 @@ pub fn save(state: &PersistedState) {
     let text = match serde_json::to_string_pretty(state) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("stackpilot: cannot serialize state: {e}");
+            log::warn!("cannot serialize state: {e}");
             return;
         }
     };
 
     if let Err(e) = fs::write(&tmp, text) {
-        eprintln!("stackpilot: cannot write state tmp file: {e}");
+        log::warn!("cannot write state tmp file: {e}");
         return;
     }
     if let Err(e) = fs::rename(&tmp, &path) {
-        eprintln!("stackpilot: cannot rename state file: {e}");
+        log::warn!("cannot rename state file: {e}");
     }
 }
 

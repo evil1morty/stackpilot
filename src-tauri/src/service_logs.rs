@@ -56,22 +56,29 @@ pub fn tail(key: &str, max_lines: usize) -> std::io::Result<Vec<String>> {
     };
 
     let len = file.metadata()?.len();
-    let read_bytes = len.min(64 * 1024) as i64;
-    file.seek(SeekFrom::End(-read_bytes))?;
+    let read_bytes = len.min(64 * 1024);
+    file.seek(SeekFrom::End(-(read_bytes as i64)))?;
 
     let mut buf = Vec::with_capacity(read_bytes as usize);
     file.read_to_end(&mut buf)?;
 
     let text = String::from_utf8_lossy(&buf);
-    let lines: Vec<String> = text
+    let mut lines: Vec<String> = text
         .split_inclusive('\n')
         .map(|s| s.trim_end_matches('\n').trim_end_matches('\r').to_string())
-        .filter(|s| !s.is_empty() || s.is_empty()) // keep blank-line shape
         .collect();
 
-    let take = lines.len().saturating_sub(if read_bytes < len as i64 { 1 } else { 0 }); // drop possibly-truncated leading line
-    let from = take.saturating_sub(max_lines);
-    Ok(lines.into_iter().take(take).skip(from).collect())
+    // If the read window started mid-file the FIRST line is likely truncated;
+    // drop it so the caller doesn't see a half-record.
+    if read_bytes < len && !lines.is_empty() {
+        lines.remove(0);
+    }
+
+    if lines.len() > max_lines {
+        let drop = lines.len() - max_lines;
+        lines.drain(..drop);
+    }
+    Ok(lines)
 }
 
 /// Total log size in bytes (current file only, not the `.old`). Used by the

@@ -57,10 +57,11 @@ export const ipc = {
     invoke<ServiceInfo>("services_restart", { key }),
   servicesOpenData: (key: string) =>
     invoke<void>("services_open_data", { key }),
-  servicesTailLog: (key: string, maxLines?: number) =>
+  servicesTailLog: (key: string, maxLines?: number, sinceSize?: number) =>
     invoke<ServiceLog>("services_tail_log", {
       key,
       maxLines: maxLines ?? 200,
+      sinceSize: sinceSize ?? null,
     }),
 
   servicesConfigFiles: (key: string) =>

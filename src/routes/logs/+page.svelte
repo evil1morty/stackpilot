@@ -16,6 +16,7 @@
   let logEl: HTMLDivElement | undefined = $state();
   let pinToBottom = $state(true);
   let pollHandle: ReturnType<typeof setInterval> | null = null;
+  let visibilityHandler: (() => void) | null = null;
 
   // Initial: respect ?service=<key> query, else stay on Operations.
   onMount(async () => {
@@ -32,13 +33,23 @@
 
   onDestroy(() => {
     if (pollHandle) clearInterval(pollHandle);
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
   });
 
-  // Poll when a service source is selected; clear poll on switch.
+  // Poll when a service source is selected; clear poll on switch. Pauses
+  // when the document is hidden (window minimised to tray) to spare the
+  // CPU + IPC + filesystem from work no one's looking at.
   $effect(() => {
     if (pollHandle) {
       clearInterval(pollHandle);
       pollHandle = null;
+    }
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
     }
     if (source.kind !== "service") {
       serviceLog = null;
@@ -48,8 +59,15 @@
     let cancelled = false;
 
     async function refresh() {
+      if (cancelled) return;
       try {
-        serviceLog = await ipc.servicesTailLog(key, 500);
+        const sinceSize = serviceLog?.sizeBytes;
+        const next = await ipc.servicesTailLog(key, 500, sinceSize);
+        // Backend returns lines:[] + matching size when nothing changed.
+        if (sinceSize != null && next.sizeBytes === sinceSize && next.lines.length === 0) {
+          return;
+        }
+        serviceLog = next;
         serviceErr = null;
         await tick();
         if (logEl && pinToBottom) logEl.scrollTop = logEl.scrollHeight;
@@ -57,15 +75,38 @@
         serviceErr = e instanceof Error ? e.message : String(e);
       }
     }
+
+    function startTimer() {
+      if (pollHandle != null) return;
+      pollHandle = setInterval(refresh, 1500);
+    }
+    function stopTimer() {
+      if (pollHandle != null) {
+        clearInterval(pollHandle);
+        pollHandle = null;
+      }
+    }
+
+    visibilityHandler = () => {
+      if (document.visibilityState === "visible") {
+        refresh();
+        startTimer();
+      } else {
+        stopTimer();
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+
     refresh();
-    pollHandle = setInterval(() => {
-      if (!cancelled) refresh();
-    }, 1500);
+    if (document.visibilityState === "visible") startTimer();
 
     return () => {
       cancelled = true;
-      if (pollHandle) clearInterval(pollHandle);
-      pollHandle = null;
+      stopTimer();
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
+        visibilityHandler = null;
+      }
     };
   });
 

@@ -1,12 +1,10 @@
-use std::collections::HashMap;
-
 use tauri::State;
 
 use crate::catalog::{self, AppEntry, CatalogStats, ScoopStatus, SortBy};
 use crate::scoopsearch;
 use crate::state::AppState;
 
-const RESULT_CAP: usize = 100;
+const RESULT_CAP: usize = 300;
 
 /// Browse Scoop's catalog. Tries the online scoopsearch index first (real
 /// BM25 relevance, last-commit timestamps, official-bucket filter). Falls
@@ -110,8 +108,3 @@ pub fn scoop_check() -> ScoopStatus {
     catalog::current_status()
 }
 
-// Suppress dead-code warning in the smoke test which builds catalog.rs alone.
-#[allow(dead_code)]
-fn _unused_hashmap_marker() -> HashMap<String, String> {
-    HashMap::new()
-}

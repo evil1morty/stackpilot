@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::SortBy;
+use crate::http;
 
 const ENDPOINT: &str =
     "https://scoopsearch.search.windows.net/indexes/apps/docs/search?api-version=2020-06-30";
@@ -154,7 +155,7 @@ pub async fn search(opts: SearchOptions<'_>) -> Result<OnlineSearchResult, Strin
         highlight_post_tag: "</mark>",
     };
 
-    let resp = reqwest::Client::new()
+    let resp = http::shared()
         .post(ENDPOINT)
         .header("api-key", API_KEY)
         .header("Content-Type", "application/json")

@@ -18,6 +18,8 @@
 use std::fs;
 use std::path::PathBuf;
 
+use crate::winutil::hide_console_std;
+
 const HOSTS_PATH: &str = r"C:\Windows\System32\drivers\etc\hosts";
 const BEGIN_MARKER: &str = "# stackpilot-begin";
 const END_MARKER: &str = "# stackpilot-end";
@@ -145,12 +147,7 @@ fn write_with_elevation(new_content: &str) -> Result<(), String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_std(&mut cmd);
 
     let status = cmd.status().map_err(|e| format!("spawn powershell: {e}"))?;
     let _ = fs::remove_file(&tmp);

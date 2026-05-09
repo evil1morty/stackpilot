@@ -8,6 +8,7 @@ use serde::Serialize;
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
+use crate::http;
 use crate::known_services::KnownService;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,13 +66,7 @@ async fn check_tcp(port: u16) -> ServiceHealth {
 }
 
 async fn check_http(url: &str) -> ServiceHealth {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_millis(800))
-        .build();
-    let Ok(client) = client else {
-        return ServiceHealth::Degraded;
-    };
-    match timeout(Duration::from_millis(800), client.get(url).send()).await {
+    match timeout(Duration::from_millis(800), http::shared().get(url).send()).await {
         Ok(Ok(resp)) if resp.status().as_u16() < 500 => ServiceHealth::Healthy,
         _ => ServiceHealth::Degraded,
     }

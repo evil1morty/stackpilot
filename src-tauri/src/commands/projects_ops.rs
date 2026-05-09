@@ -16,6 +16,7 @@ use crate::projects;
 use crate::scoop::scoop_root;
 use crate::state::AppState;
 use crate::vhosts;
+use crate::winutil::{hide_console_std, which};
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -324,7 +325,7 @@ pub fn projects_open_terminal(key: String) -> Result<(), String> {
 
     // Prefer Windows Terminal if it's on PATH; users who installed it via
     // Scoop or the Store will get a nicer experience.
-    let use_wt = which("wt").is_some();
+    let use_wt = which("wt", &["exe", "cmd", "bat"]).is_some();
 
     let mut cmd = std::process::Command::new("cmd");
     if use_wt {
@@ -354,12 +355,7 @@ pub fn projects_open_terminal(key: String) -> Result<(), String> {
         cmd.env(k, v);
     }
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_std(&mut cmd);
 
     cmd.stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -368,20 +364,6 @@ pub fn projects_open_terminal(key: String) -> Result<(), String> {
         .map_err(|e| format!("failed to launch terminal: {e}"))?;
 
     Ok(())
-}
-
-/// Tiny `which` for Windows: probes PATH for `<name>.exe` and `<name>.cmd`.
-fn which(name: &str) -> Option<std::path::PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        for ext in &["exe", "cmd", "bat"] {
-            let candidate = dir.join(format!("{name}.{ext}"));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
 }
 
 #[tauri::command]

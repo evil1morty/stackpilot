@@ -2,6 +2,7 @@ mod catalog;
 mod commands;
 mod health;
 mod hosts_file;
+mod http;
 mod known_services;
 mod persistence;
 mod presets;
@@ -13,6 +14,7 @@ mod ssl;
 mod state;
 mod tray;
 mod vhosts;
+mod winutil;
 
 use commands::catalog::{catalog_list, catalog_refresh, catalog_stats, scoop_check};
 use commands::ping::ping;
@@ -34,6 +36,14 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Honors RUST_LOG; defaults to `info` so production builds still surface
+    // warnings/errors without spamming. env_logger is a tiny dep that's well
+    // understood and good enough for a desktop app of this size.
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    )
+    .try_init();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(AppState::load_from_disk())
@@ -41,7 +51,7 @@ pub fn run() {
             tray::install(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| tray::on_window_event(window, event))
+        .on_window_event(tray::on_window_event)
         .invoke_handler(tauri::generate_handler![
             ping,
             catalog_list,

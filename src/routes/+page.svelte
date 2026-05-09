@@ -4,21 +4,22 @@
   import { ipc } from "$lib/ipc";
   import type { ServiceInfo } from "$lib/types";
   import ServiceCard from "$lib/components/ServiceCard.svelte";
+  import { startPolling } from "$lib/util/poll";
 
   let services = $state<ServiceInfo[]>([]);
   let loading = $state(true);
   let manualRefreshing = $state(false);
   let error = $state<string | null>(null);
 
-  let pollHandle: ReturnType<typeof setInterval> | null = null;
+  let stopPolling: (() => void) | null = null;
 
   onMount(async () => {
     await refresh();
-    pollHandle = setInterval(refresh, 2500);
+    stopPolling = startPolling(refresh, 2500);
   });
 
   onDestroy(() => {
-    if (pollHandle) clearInterval(pollHandle);
+    stopPolling?.();
   });
 
   async function refresh() {

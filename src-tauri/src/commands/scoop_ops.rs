@@ -4,6 +4,7 @@
 //! without polling.
 
 use std::process::Stdio;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -13,6 +14,7 @@ use tokio::process::Command;
 
 use crate::scoop::scoop_root;
 use crate::state::AppState;
+use crate::winutil::{hide_console_std, hide_console_tokio};
 
 // ──────────────────────────────────────────────── event payload ───────────
 
@@ -25,6 +27,15 @@ pub enum ScoopEvent {
     Finished { exit_code: i32 },
     Error { message: String },
 }
+
+/// Wall-clock cap on a single scoop subprocess. Exceeded only by genuinely
+/// hung installs; surfaces as a Stderr warning + taskkill so `running_pid`
+/// is freed for the next op.
+const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+
+/// Hard cap on a Scoop app reference passed to the CLI. `bucket/app` shouldn't
+/// approach this in practice; we clamp purely to bound argv size.
+const MAX_APP_REF_LEN: usize = 128;
 
 // ──────────────────────────────────────────────── helpers ─────────────────
 
@@ -63,6 +74,34 @@ fn powershell_inline(script: &str) -> Command {
     cmd
 }
 
+/// RAII guard that reserves the single in-flight scoop slot and clears it on
+/// drop. Returned `None` means another op is already running (caller should
+/// reject).
+struct OpSlot<'a> {
+    state: &'a AppState,
+}
+
+impl<'a> OpSlot<'a> {
+    /// Reserve the in-flight slot atomically. Returns `None` if another op is
+    /// already running. The slot stores a sentinel PID 0 until `drive` swaps
+    /// in the real child PID after spawn — that's what closes the TOCTOU
+    /// window two concurrent callers would otherwise race through.
+    fn try_acquire(state: &'a AppState) -> Option<Self> {
+        let mut guard = state.running_pid.lock();
+        if guard.is_some() {
+            return None;
+        }
+        *guard = Some(0);
+        Some(Self { state })
+    }
+}
+
+impl<'a> Drop for OpSlot<'a> {
+    fn drop(&mut self) {
+        *self.state.running_pid.lock() = None;
+    }
+}
+
 /// Spawn a `Command`, wire stdout+stderr to a streaming `Channel`, and resolve
 /// once the child exits. Caller is responsible for any post-completion
 /// state mutation (cache refresh, etc.).
@@ -76,12 +115,7 @@ pub(crate) async fn drive(
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
 
-    // Hide the spawned console window on Windows.
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_tokio(&mut cmd);
 
     let _ = on_event.send(ScoopEvent::Started {
         command: label.to_string(),
@@ -94,7 +128,6 @@ pub(crate) async fn drive(
         *state.running_pid.lock() = Some(pid);
     }
 
-    // Helper to ensure we clear PID before propagating any error after spawn.
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => {
@@ -126,30 +159,111 @@ pub(crate) async fn drive(
         }
     });
 
-    let wait_result = child.wait().await;
+    let wait = child.wait();
+    let wait_result = match tokio::time::timeout(SUBPROCESS_TIMEOUT, wait).await {
+        Ok(r) => r,
+        Err(_) => {
+            // Timeout: kill the child so the slot is freed; surface to UI.
+            if let Some(pid) = pid {
+                kill_pid(pid).await;
+            }
+            let _ = on_event.send(ScoopEvent::Stderr {
+                line: format!(
+                    "◇ killed after {}m wall-clock timeout",
+                    SUBPROCESS_TIMEOUT.as_secs() / 60
+                ),
+            });
+            *state.running_pid.lock() = None;
+            return Err("scoop subprocess timed out".into());
+        }
+    };
     let _ = stdout_task.await;
     let _ = stderr_task.await;
 
-    // Always clear PID before returning, even on wait() failure, otherwise
-    // a stale PID would block future operations.
     *state.running_pid.lock() = None;
 
     let status = wait_result.map_err(|e| e.to_string())?;
     Ok(status.code().unwrap_or(-1))
 }
 
+async fn kill_pid(pid: u32) {
+    let mut kill = Command::new("taskkill");
+    kill.args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    hide_console_tokio(&mut kill);
+    let _ = kill.status().await;
+}
+
 /// Validate that `app_name` looks like a Scoop app reference (optionally
 /// `bucket/name`). Rejects anything containing whitespace, semicolons, pipes,
-/// quotes, ampersands, or other shell metacharacters.
+/// quotes, ampersands, or other shell metacharacters. Length is bounded so
+/// pathological inputs can't blow up the argv buffer.
 fn validate_app_ref(app: &str) -> Result<(), String> {
     if app.is_empty() {
         return Err("app name cannot be empty".into());
+    }
+    if app.len() > MAX_APP_REF_LEN {
+        return Err(format!(
+            "app name too long ({} > {} chars)",
+            app.len(),
+            MAX_APP_REF_LEN
+        ));
     }
     let allowed =
         |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '@' | '/');
     if !app.chars().all(allowed) {
         return Err(format!("invalid app name: {app:?}"));
     }
+    Ok(())
+}
+
+/// Reject "another op running" + emit Error event. Used by every command
+/// entry point to keep the rejection path uniform.
+fn reject_if_busy<'a>(
+    state: &'a AppState,
+    on_event: &Channel<ScoopEvent>,
+) -> Result<OpSlot<'a>, String> {
+    match OpSlot::try_acquire(state) {
+        Some(slot) => Ok(slot),
+        None => {
+            let msg = "another scoop operation is already running".to_string();
+            let _ = on_event.send(ScoopEvent::Error {
+                message: msg.clone(),
+            });
+            Err(msg)
+        }
+    }
+}
+
+/// Shared body for install / update / uninstall.
+async fn run_scoop_app_op(
+    verb: &'static str,
+    app: &str,
+    on_event: &Channel<ScoopEvent>,
+    state: &State<'_, AppState>,
+) -> Result<(), String> {
+    if let Err(e) = validate_app_ref(app) {
+        let _ = on_event.send(ScoopEvent::Error {
+            message: e.clone(),
+        });
+        return Err(e);
+    }
+
+    let cmd = match scoop_powershell(&[verb, app]) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = on_event.send(ScoopEvent::Error {
+                message: e.clone(),
+            });
+            return Err(e);
+        }
+    };
+    let label = format!("scoop {verb} {app}");
+    let exit_code = drive(cmd, on_event, state, &label).await?;
+    let _ = on_event.send(ScoopEvent::Finished { exit_code });
+
+    state.catalog.refresh();
     Ok(())
 }
 
@@ -161,36 +275,8 @@ pub async fn scoop_install(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if state.running_pid.lock().is_some() {
-        let msg = "another scoop operation is already running".to_string();
-        let _ = on_event.send(ScoopEvent::Error {
-            message: msg.clone(),
-        });
-        return Err(msg);
-    }
-    if let Err(e) = validate_app_ref(&app) {
-        let _ = on_event.send(ScoopEvent::Error {
-            message: e.clone(),
-        });
-        return Err(e);
-    }
-
-    let cmd = match scoop_powershell(&["install", &app]) {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = on_event.send(ScoopEvent::Error {
-                message: e.clone(),
-            });
-            return Err(e);
-        }
-    };
-    let label = format!("scoop install {app}");
-    let exit_code = drive(cmd, &on_event, &state, &label).await?;
-    let _ = on_event.send(ScoopEvent::Finished { exit_code });
-
-    // Whether install succeeded or failed, the on-disk state may have changed.
-    state.catalog.refresh();
-    Ok(())
+    let _slot = reject_if_busy(&state, &on_event)?;
+    run_scoop_app_op("install", &app, &on_event, &state).await
 }
 
 #[tauri::command]
@@ -199,35 +285,8 @@ pub async fn scoop_update(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if state.running_pid.lock().is_some() {
-        let msg = "another scoop operation is already running".to_string();
-        let _ = on_event.send(ScoopEvent::Error {
-            message: msg.clone(),
-        });
-        return Err(msg);
-    }
-    if let Err(e) = validate_app_ref(&app) {
-        let _ = on_event.send(ScoopEvent::Error {
-            message: e.clone(),
-        });
-        return Err(e);
-    }
-
-    let cmd = match scoop_powershell(&["update", &app]) {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = on_event.send(ScoopEvent::Error {
-                message: e.clone(),
-            });
-            return Err(e);
-        }
-    };
-    let label = format!("scoop update {app}");
-    let exit_code = drive(cmd, &on_event, &state, &label).await?;
-    let _ = on_event.send(ScoopEvent::Finished { exit_code });
-
-    state.catalog.refresh();
-    Ok(())
+    let _slot = reject_if_busy(&state, &on_event)?;
+    run_scoop_app_op("update", &app, &on_event, &state).await
 }
 
 #[tauri::command]
@@ -236,35 +295,8 @@ pub async fn scoop_uninstall(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if state.running_pid.lock().is_some() {
-        let msg = "another scoop operation is already running".to_string();
-        let _ = on_event.send(ScoopEvent::Error {
-            message: msg.clone(),
-        });
-        return Err(msg);
-    }
-    if let Err(e) = validate_app_ref(&app) {
-        let _ = on_event.send(ScoopEvent::Error {
-            message: e.clone(),
-        });
-        return Err(e);
-    }
-
-    let cmd = match scoop_powershell(&["uninstall", &app]) {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = on_event.send(ScoopEvent::Error {
-                message: e.clone(),
-            });
-            return Err(e);
-        }
-    };
-    let label = format!("scoop uninstall {app}");
-    let exit_code = drive(cmd, &on_event, &state, &label).await?;
-    let _ = on_event.send(ScoopEvent::Finished { exit_code });
-
-    state.catalog.refresh();
-    Ok(())
+    let _slot = reject_if_busy(&state, &on_event)?;
+    run_scoop_app_op("uninstall", &app, &on_event, &state).await
 }
 
 #[tauri::command]
@@ -272,13 +304,7 @@ pub async fn scoop_bootstrap(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    if state.running_pid.lock().is_some() {
-        let msg = "another scoop operation is already running".to_string();
-        let _ = on_event.send(ScoopEvent::Error {
-            message: msg.clone(),
-        });
-        return Err(msg);
-    }
+    let _slot = reject_if_busy(&state, &on_event)?;
 
     // The official one-liner. -Force on Set-ExecutionPolicy keeps it from
     // prompting the user when the policy is already RemoteSigned.
@@ -306,19 +332,18 @@ pub async fn scoop_cancel(state: State<'_, AppState>) -> Result<bool, String> {
     let Some(pid) = pid else {
         return Ok(false);
     };
-
-    let mut kill = Command::new("taskkill");
-    kill.args(["/T", "/F", "/PID", &pid.to_string()])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        kill.creation_flags(CREATE_NO_WINDOW);
+    // Sentinel slot reservation (PID 0) means a slot is held but no child has
+    // spawned yet — nothing to kill, just release.
+    if pid == 0 {
+        return Ok(true);
     }
 
-    let _ = kill.status().await;
+    let mut kill = std::process::Command::new("taskkill");
+    kill.args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    hide_console_std(&mut kill);
+    let _ = tokio::task::spawn_blocking(move || kill.status()).await;
     Ok(true)
 }
 
@@ -368,5 +393,10 @@ mod tests {
     fn rejects_empty() {
         assert!(validate_app_ref("").is_err());
     }
-}
 
+    #[test]
+    fn rejects_overlong() {
+        let long = "a".repeat(200);
+        assert!(validate_app_ref(&long).is_err());
+    }
+}

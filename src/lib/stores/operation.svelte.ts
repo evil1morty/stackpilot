@@ -56,10 +56,11 @@ class OperationStore {
       if (this.current) {
         this.current.state = "cancelled";
         this.current.endedAt = Date.now();
-        this.current.lines = [
-          ...this.current.lines,
-          { kind: "system", text: "── cancelled ──", t: Date.now() },
-        ];
+        this.current.lines.push({
+          kind: "system",
+          text: "── cancelled ──",
+          t: Date.now(),
+        });
       }
     } catch (e) {
       this.appendSystem(`cancel failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -133,16 +134,21 @@ class OperationStore {
         this.current.command = msg.payload.command;
         break;
       case "stdout":
-        this.current.lines = [
-          ...this.current.lines,
-          { kind: "stdout", text: msg.payload.line, t: Date.now() },
-        ];
+        // Mutate the reactive array in place rather than spread-rebuilding it.
+        // A scoop install of a large package emits thousands of lines; the
+        // old `[...lines, line]` form is O(n^2) and noticeably stalls the UI.
+        this.current.lines.push({
+          kind: "stdout",
+          text: msg.payload.line,
+          t: Date.now(),
+        });
         break;
       case "stderr":
-        this.current.lines = [
-          ...this.current.lines,
-          { kind: "stderr", text: msg.payload.line, t: Date.now() },
-        ];
+        this.current.lines.push({
+          kind: "stderr",
+          text: msg.payload.line,
+          t: Date.now(),
+        });
         break;
       case "finished":
         this.current.exitCode = msg.payload.exitCode;
@@ -153,19 +159,17 @@ class OperationStore {
         break;
     }
 
-    // Cap retained log lines to avoid unbounded memory.
+    // Cap retained log lines to bound memory. splice() in-place is O(n) for
+    // the trimmed prefix only, not a full O(n) rebuild on every line.
     const MAX = 4000;
     if (this.current.lines.length > MAX) {
-      this.current.lines = this.current.lines.slice(-MAX);
+      this.current.lines.splice(0, this.current.lines.length - MAX);
     }
   }
 
   private appendSystem(text: string) {
     if (!this.current) return;
-    this.current.lines = [
-      ...this.current.lines,
-      { kind: "system", text, t: Date.now() },
-    ];
+    this.current.lines.push({ kind: "system", text, t: Date.now() });
   }
 }
 

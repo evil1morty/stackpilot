@@ -19,6 +19,7 @@ use crate::known_services::{self, KnownService};
 use crate::scoop::scoop_root;
 use crate::service_logs;
 use crate::state::{AppState, TrackedService};
+use crate::winutil::hide_console_tokio;
 
 /// How long after start we treat "port not yet bound" as "Starting" rather
 /// than failed/dead. Most services bind in <500ms; 5s is a generous cushion.
@@ -61,10 +62,40 @@ pub struct ServiceInfo {
 /// Try to discover which PID is listening on `port`, if any. Wraps the
 /// `listeners` crate which uses `GetExtendedTcpTable` on Windows. The crate
 /// returns `Err` when nothing is listening, so we collapse that to `None`.
+///
+/// Prefer `PortMap::get` when probing more than one port back-to-back —
+/// `listeners::get_all` enumerates the kernel TCP table once and is much
+/// cheaper than this call repeated per port.
 fn pid_on_port(port: u16) -> Option<u32> {
     listeners::get_process_by_port(port, listeners::Protocol::TCP)
         .ok()
         .map(|p| p.pid)
+}
+
+/// Snapshot of TCP-port → owning PID. Built once per `services_list` call
+/// and shared across every row's status + health probe so we don't pay for
+/// `GetExtendedTcpTable` (or its non-Windows equivalent) per service.
+struct PortMap(HashMap<u16, u32>);
+
+impl PortMap {
+    fn snapshot() -> Self {
+        let mut map = HashMap::new();
+        if let Ok(listeners) = listeners::get_all() {
+            for l in listeners {
+                if matches!(l.protocol, listeners::Protocol::TCP) {
+                    // Multiple sockets can bind the same port (IPv4 + IPv6);
+                    // first writer wins — they should all reference the same
+                    // owning process.
+                    map.entry(l.socket.port()).or_insert(l.process.pid);
+                }
+            }
+        }
+        Self(map)
+    }
+
+    fn get(&self, port: u16) -> Option<u32> {
+        self.0.get(&port).copied()
+    }
 }
 
 fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedService>) -> ServiceStatus {
@@ -85,7 +116,7 @@ fn current_status(svc: &KnownService, tracked: &HashMap<String, TrackedService>)
 /// Drop tracked entries whose recorded PID no longer owns the recorded port,
 /// with a brief startup grace window so a service mid-boot isn't culled.
 /// Returns true if anything was removed (caller should persist).
-fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
+fn sweep_dead_with(tracked: &mut HashMap<String, TrackedService>, ports: &PortMap) -> bool {
     let now = unix_now();
     let mut dead: Vec<String> = Vec::new();
     for (k, t) in tracked.iter() {
@@ -95,7 +126,7 @@ fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
             continue;
         }
         let alive = match t.port {
-            Some(port) => pid_on_port(port) == Some(t.pid),
+            Some(port) => ports.get(port) == Some(t.pid),
             None => false,
         };
         if !alive {
@@ -107,6 +138,12 @@ fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
         tracked.remove(&k);
     }
     changed
+}
+
+/// Wrapper that builds a fresh PortMap for callers that don't have one in
+/// hand (e.g. services_stop). For services_list, prefer the snapshot path.
+fn sweep_dead(tracked: &mut HashMap<String, TrackedService>) -> bool {
+    sweep_dead_with(tracked, &PortMap::snapshot())
 }
 
 fn unix_now() -> u64 {
@@ -122,10 +159,15 @@ fn unix_now() -> u64 {
 pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo>, String> {
     let root = scoop_root();
 
+    // ONE TCP-table enumeration shared across sweep + every row + every
+    // health-probe staleness check. Calling `pid_on_port` per row used to
+    // hit the kernel ~3× per service.
+    let ports = PortMap::snapshot();
+
     // Sweep + persist before snapshotting so the snapshot reflects truth.
     {
         let mut tracked = state.tracked.lock();
-        let changed = sweep_dead(&mut tracked);
+        let changed = sweep_dead_with(&mut tracked, &ports);
         drop(tracked);
         if changed {
             state.persist_tracked();
@@ -143,6 +185,7 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
         persist_dir: Option<String>,
         tracked_entry: Option<TrackedService>,
         external_pid: Option<u32>,
+        port_owner: Option<u32>,
     }
     let rows: Vec<Row> = known_services::KNOWN
         .iter()
@@ -154,11 +197,8 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
                 .and_then(|r| known_services::persist_dir(svc, r))
                 .map(|p| p.display().to_string());
             let tracked_entry = tracked_snapshot.get(svc.key).cloned();
-            let external_pid = if tracked_entry.is_none() {
-                svc.default_port.and_then(pid_on_port)
-            } else {
-                None
-            };
+            let port_owner = svc.default_port.and_then(|p| ports.get(p));
+            let external_pid = if tracked_entry.is_none() { port_owner } else { None };
             Row {
                 svc,
                 bin,
@@ -166,6 +206,7 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
                 persist_dir,
                 tracked_entry,
                 external_pid,
+                port_owner,
             }
         })
         .collect();
@@ -183,7 +224,7 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
         let health = match (&row.tracked_entry, row.external_pid) {
             (Some(t), _)
                 if now.saturating_sub(t.started_at) < STARTUP_GRACE_SECS
-                    && row.svc.default_port.and_then(pid_on_port) != Some(t.pid) =>
+                    && row.port_owner != Some(t.pid) =>
             {
                 ServiceHealth::Starting
             }
@@ -272,11 +313,7 @@ pub(crate) async fn services_start_with_env(
             .stderr(Stdio::from(init_log.stderr))
             .stdin(Stdio::null());
 
-        #[cfg(windows)]
-        {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            init_cmd.creation_flags(CREATE_NO_WINDOW);
-        }
+        hide_console_tokio(&mut init_cmd);
 
         let init_status = init_cmd.status().await.map_err(|e| {
             format!(
@@ -303,11 +340,7 @@ pub(crate) async fn services_start_with_env(
         .stderr(Stdio::from(log.stderr))
         .stdin(Stdio::null());
 
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_tokio(&mut cmd);
 
     let child = cmd
         .spawn()
@@ -346,11 +379,7 @@ pub(crate) async fn services_start_with_env(
             kill.args(["/T", "/F", "/PID", &pid.to_string()])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
-            #[cfg(windows)]
-            {
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                kill.creation_flags(CREATE_NO_WINDOW);
-            }
+            hide_console_tokio(&mut kill);
             let _ = kill.status().await;
 
             let hint = startup_failure_hint(svc, &tail);
@@ -443,10 +472,12 @@ pub async fn services_stop(
 ) -> Result<ServiceInfo, String> {
     let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
 
-    let pid_to_kill: Option<u32> = {
+    let (pid_to_kill, mutated) = {
         let mut tracked = state.tracked.lock();
-        sweep_dead(&mut tracked);
-        if let Some(t) = tracked.remove(svc.key) {
+        let swept = sweep_dead(&mut tracked);
+        let removed = tracked.remove(svc.key);
+        let mutated = swept || removed.is_some();
+        let pid = if let Some(t) = removed {
             Some(t.pid)
         } else if let Some(port) = svc.default_port {
             // Stop external process listening on our port — covers cases
@@ -454,9 +485,12 @@ pub async fn services_stop(
             pid_on_port(port)
         } else {
             None
-        }
+        };
+        (pid, mutated)
     };
-    state.persist_tracked();
+    if mutated {
+        state.persist_tracked();
+    }
 
     let pid = match pid_to_kill {
         Some(p) => p,
@@ -468,11 +502,7 @@ pub async fn services_stop(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
-    #[cfg(windows)]
-    {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        kill.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_tokio(&mut kill);
 
     kill.status()
         .await
@@ -577,43 +607,79 @@ pub fn services_config_write(path: String, content: String) -> Result<(), String
 }
 
 /// Defense-in-depth for the config-write path. The frontend only writes to
-/// paths returned by services_config_files, but reject anything that isn't
-/// inside a Scoop-managed directory just in case.
+/// paths returned by services_config_files, but we reject anything outside a
+/// Scoop-managed directory just in case.
 ///
-/// We deliberately do NOT use `Path::canonicalize()` here: on Windows it
-/// returns the `\\?\` extended-length form for paths that exist, but
-/// silently fails (returning the original) for missing files. The two
-/// halves of the comparison would then disagree purely because of the
-/// `\\?\` prefix. Compare normalized lowercase strings instead.
+/// Strategy: canonicalize root and the longest existing ancestor of `path`,
+/// then compare prefixes. `dunce::canonicalize` strips Windows' `\\?\`
+/// extended-length prefix so the comparison stays sane. We canonicalize the
+/// existing ancestor (rather than `path` itself) so the validation works
+/// even when the file doesn't exist yet — useful for first-time saves.
 fn validate_config_path(path: &str) -> Result<(), String> {
     let Some(root) = scoop_root() else {
         return Err("Scoop is not installed".into());
     };
-    let path_norm = path.to_ascii_lowercase().replace('\\', "/");
-    let root_norm = root
-        .to_string_lossy()
-        .to_ascii_lowercase()
-        .replace('\\', "/");
-    if !path_norm.starts_with(&root_norm) {
+
+    let candidate = std::path::Path::new(path);
+    let canonical_root = dunce::canonicalize(&root)
+        .map_err(|e| format!("canonicalize scoop root: {e}"))?;
+
+    // Walk up to the deepest existing ancestor — symlinks/junctions resolve
+    // here, so a config-file path that has been swapped to point outside the
+    // Scoop tree gets caught.
+    let mut probe: Option<&std::path::Path> = Some(candidate);
+    let canonical_target = loop {
+        let Some(p) = probe else {
+            return Err(format!("could not resolve any ancestor of {path}"));
+        };
+        if p.exists() {
+            break dunce::canonicalize(p)
+                .map_err(|e| format!("canonicalize {}: {e}", p.display()))?;
+        }
+        probe = p.parent();
+    };
+
+    if !canonical_target.starts_with(&canonical_root) {
         return Err(format!("refusing to touch path outside Scoop root: {path}"));
     }
-    if path_norm.contains("/../")
-        || path_norm.starts_with("../")
-        || path_norm.ends_with("/..")
-    {
+
+    // Belt-and-braces: even after canonicalization, reject `..` segments in
+    // the *original* input — keeps surprises out of error messages and
+    // avoids relying on canonicalize semantics for traversal-style attacks.
+    let path_norm = path.replace('\\', "/");
+    if path_norm.contains("/../") || path_norm.starts_with("../") || path_norm.ends_with("/..") {
         return Err(format!("path contains parent traversal: {path}"));
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn services_tail_log(key: String, max_lines: Option<usize>) -> Result<ServiceLog, String> {
+pub fn services_tail_log(
+    key: String,
+    max_lines: Option<usize>,
+    since_size: Option<u64>,
+) -> Result<ServiceLog, String> {
     let limit = max_lines.unwrap_or(200).clamp(1, 2000);
-    let lines = service_logs::tail(&key, limit).map_err(|e| e.to_string())?;
     let path = crate::persistence::log_file_for(&key)
         .display()
         .to_string();
     let size_bytes = service_logs::size(&key);
+
+    // Fast path: caller has a snapshot and the file hasn't grown — return an
+    // empty `lines` list so the frontend can skip the re-render. Saves a
+    // 64 KB read + ~500 line decode every poll for an idle service.
+    if let Some(since) = since_size {
+        if since == size_bytes {
+            return Ok(ServiceLog {
+                key,
+                path,
+                size_bytes,
+                lines: Vec::new(),
+            });
+        }
+    }
+
+    let lines = service_logs::tail(&key, limit).map_err(|e| e.to_string())?;
     Ok(ServiceLog {
         key,
         path,
@@ -627,12 +693,7 @@ pub fn services_tail_log(key: String, max_lines: Option<usize>) -> Result<Servic
 /// services without `persist` keep their data — Redis writes RDB files
 /// next to the binary, Caddy ships its Caddyfile here, etc.).
 #[tauri::command]
-pub fn services_open_data(
-    key: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let _ = state;
+pub fn services_open_data(key: String, app: AppHandle) -> Result<(), String> {
     let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
     let root = scoop_root().ok_or_else(|| "Scoop is not installed".to_string())?;
 

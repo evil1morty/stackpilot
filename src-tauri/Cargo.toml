@@ -1,9 +1,10 @@
 [package]
 name = "stackpilot"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+version = "0.3.0"
+description = "Modern Windows GUI for browsing, installing, and running dev services via Scoop."
+authors = ["Stackpilot contributors"]
 edition = "2021"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -31,4 +32,7 @@ listeners = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 dirs = "5"
 futures = "0.3"
+dunce = "1"
+log = "0.4"
+env_logger = "0.11"
 

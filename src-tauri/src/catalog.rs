@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -536,32 +537,37 @@ pub fn current_status() -> ScoopStatus {
 
 #[derive(Default)]
 pub struct CatalogCache {
-    inner: parking_lot::Mutex<Option<Vec<AppEntry>>>,
+    inner: parking_lot::Mutex<Option<Arc<Vec<AppEntry>>>>,
 }
 
 impl CatalogCache {
     /// Borrow the catalog, building it on first access. Returns an empty Vec
-    /// if Scoop is not installed.
-    pub fn ensure(&self) -> Vec<AppEntry> {
-        let mut guard = self.inner.lock();
-        if let Some(c) = guard.as_ref() {
-            return c.clone();
+    /// if Scoop is not installed. The returned `Arc` lets callers iterate
+    /// without copying the underlying ~3,800-entry vector.
+    pub fn ensure(&self) -> Arc<Vec<AppEntry>> {
+        {
+            let guard = self.inner.lock();
+            if let Some(c) = guard.as_ref() {
+                return Arc::clone(c);
+            }
         }
         let catalog = match scoop_root() {
             Some(root) => build_catalog(&root),
             None => Vec::new(),
         };
-        *guard = Some(catalog.clone());
-        catalog
+        let arc = Arc::new(catalog);
+        *self.inner.lock() = Some(Arc::clone(&arc));
+        arc
     }
 
-    pub fn refresh(&self) -> Vec<AppEntry> {
+    pub fn refresh(&self) -> Arc<Vec<AppEntry>> {
         let catalog = match scoop_root() {
             Some(root) => build_catalog(&root),
             None => Vec::new(),
         };
-        *self.inner.lock() = Some(catalog.clone());
-        catalog
+        let arc = Arc::new(catalog);
+        *self.inner.lock() = Some(Arc::clone(&arc));
+        arc
     }
 
     #[allow(dead_code)]

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::process::Stdio;
 
 use crate::persistence;
+use crate::winutil::{hide_console_std, which};
 
 const VALID_DAYS: u32 = 825; // matches modern browser cap (Apple's policy)
 
@@ -46,7 +47,7 @@ pub fn mint(host: &str) -> Result<CertPaths, String> {
         return Ok(CertPaths { crt, key });
     }
 
-    let openssl = locate_openssl().ok_or_else(|| {
+    let openssl = which("openssl", &["exe"]).ok_or_else(|| {
         "OpenSSL not found on PATH. Install via `scoop install openssl`.".to_string()
     })?;
 
@@ -74,12 +75,7 @@ pub fn mint(host: &str) -> Result<CertPaths, String> {
     .stdout(Stdio::null())
     .stderr(Stdio::piped());
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_std(&mut cmd);
 
     let output = cmd
         .output()
@@ -94,24 +90,6 @@ pub fn mint(host: &str) -> Result<CertPaths, String> {
     }
 
     Ok(CertPaths { crt, key })
-}
-
-/// Probe PATH for openssl[.exe], same simple `which` we use for wt.
-pub fn locate_openssl() -> Option<PathBuf> {
-    let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        for ext in &["", "exe"] {
-            let candidate = if ext.is_empty() {
-                dir.join("openssl")
-            } else {
-                dir.join(format!("openssl.{ext}"))
-            };
-            if candidate.is_file() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]
