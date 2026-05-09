@@ -12,24 +12,30 @@
   let error = $state<string | null>(null);
 
   let stopPolling: (() => void) | null = null;
+  let unmounted = false;
 
   onMount(async () => {
     await refresh();
+    if (unmounted) return;
     stopPolling = startPolling(refresh, 2500);
   });
 
   onDestroy(() => {
+    unmounted = true;
     stopPolling?.();
   });
 
   async function refresh() {
     try {
-      services = await ipc.servicesList();
+      const next = await ipc.servicesList();
+      if (unmounted) return;
+      services = next;
       error = null;
     } catch (e) {
+      if (unmounted) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (!unmounted) loading = false;
     }
   }
 

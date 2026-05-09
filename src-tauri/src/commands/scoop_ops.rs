@@ -325,6 +325,9 @@ pub async fn scoop_bootstrap(
     let exit_code = drive(cmd, &on_event, &state, "scoop bootstrap").await?;
     let _ = on_event.send(ScoopEvent::Finished { exit_code });
 
+    // Bootstrap may have just created the scoop install — invalidate the
+    // cached `scoop_root()` so the next caller actually finds it.
+    crate::scoop::invalidate_cache();
     state.catalog.refresh();
     Ok(())
 }

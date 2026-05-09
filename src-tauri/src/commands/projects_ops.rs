@@ -14,9 +14,25 @@ use crate::hosts_file;
 use crate::known_services;
 use crate::projects;
 use crate::scoop::scoop_root;
+use crate::ssl;
 use crate::state::AppState;
 use crate::vhosts;
 use crate::winutil::{hide_console_std, which};
+
+/// Collect hostnames referenced by any project's vhosts. Used to GC stale
+/// cert files after project mutations.
+fn all_active_vhost_hosts(file: &projects::ProjectsFile) -> std::collections::HashSet<String> {
+    let mut hosts = std::collections::HashSet::new();
+    for p in &file.projects {
+        for vh in &p.vhosts {
+            let trimmed = vh.host.trim();
+            if !trimmed.is_empty() {
+                hosts.insert(trimmed.to_string());
+            }
+        }
+    }
+    hosts
+}
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +131,9 @@ pub fn projects_update(key: String, input: ProjectInput) -> Result<ProjectInfo, 
     project.vhosts = input.vhosts;
     let cloned = project.clone();
     projects::save(&file)?;
+    // Project edits can drop vhosts; sweep cert files that no project
+    // references any more.
+    ssl::reap_orphans(&all_active_vhost_hosts(&file));
     Ok(to_info(cloned, &file.active_key))
 }
 
@@ -130,6 +149,8 @@ pub fn projects_delete(key: String) -> Result<(), String> {
         file.active_key = None;
     }
     projects::save(&file)?;
+    // Drop cert files for hosts no longer referenced by any project.
+    ssl::reap_orphans(&all_active_vhost_hosts(&file));
     Ok(())
 }
 

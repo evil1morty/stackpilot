@@ -89,6 +89,30 @@ pub fn size(key: &str) -> u64 {
         .unwrap_or(0)
 }
 
+/// Best-effort cleanup of log files for service keys that are no longer
+/// installed. Called from `services_list` so the GC piggybacks on a hot
+/// path without ever blocking — failures are silently ignored. `keep`
+/// is the set of service keys to retain.
+pub fn reap_orphans<I: IntoIterator<Item = &'static str>>(keep: I) {
+    let dir = persistence::logs_dir();
+    let Ok(rd) = fs::read_dir(&dir) else { return };
+
+    let keep: std::collections::HashSet<&'static str> = keep.into_iter().collect();
+    for entry in rd.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        // Match `<key>.log` and `<key>.log.old`.
+        let stem = name
+            .strip_suffix(".log.old")
+            .or_else(|| name.strip_suffix(".log"));
+        let Some(stem) = stem else { continue };
+        if !keep.contains(stem) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

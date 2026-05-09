@@ -99,6 +99,9 @@ pub fn catalog_stats(state: State<'_, AppState>) -> CatalogStats {
 
 #[tauri::command]
 pub fn catalog_refresh(state: State<'_, AppState>) -> CatalogStats {
+    // User asked for a fresh look — drop the cached scoop_root in case
+    // they've moved/reinstalled their install since startup.
+    crate::scoop::invalidate_cache();
     let catalog = state.catalog.refresh();
     catalog::stats(&catalog)
 }

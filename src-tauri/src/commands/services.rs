@@ -80,21 +80,88 @@ struct PortMap(HashMap<u16, u32>);
 impl PortMap {
     fn snapshot() -> Self {
         let mut map = HashMap::new();
-        if let Ok(listeners) = listeners::get_all() {
-            for l in listeners {
-                if matches!(l.protocol, listeners::Protocol::TCP) {
-                    // Multiple sockets can bind the same port (IPv4 + IPv6);
-                    // first writer wins — they should all reference the same
-                    // owning process.
-                    map.entry(l.socket.port()).or_insert(l.process.pid);
+        match listeners::get_all() {
+            Ok(listeners) => {
+                for l in listeners {
+                    if matches!(l.protocol, listeners::Protocol::TCP) {
+                        // Multiple sockets can bind the same port (IPv4 +
+                        // IPv6); first writer wins — they should all
+                        // reference the same owning process.
+                        map.entry(l.socket.port()).or_insert(l.process.pid);
+                    }
                 }
+            }
+            Err(e) => {
+                // Don't silently treat the kernel call failing as "no ports
+                // owned" — every service would look stopped. Log it and let
+                // PortMap::get fall back to per-port probes via
+                // `pid_on_port`. Logged at warn so production builds see it
+                // in env_logger output.
+                log::warn!("listeners::get_all failed, falling back to per-port probes: {e}");
             }
         }
         Self(map)
     }
 
+    /// Look up `port` in the snapshot. Falls back to a one-shot
+    /// `pid_on_port` if the snapshot is empty (i.e. enumeration failed) —
+    /// otherwise we'd misreport every service as stopped on a transient
+    /// kernel error.
     fn get(&self, port: u16) -> Option<u32> {
-        self.0.get(&port).copied()
+        if let Some(pid) = self.0.get(&port).copied() {
+            return Some(pid);
+        }
+        if self.0.is_empty() {
+            return pid_on_port(port);
+        }
+        None
+    }
+}
+
+/// RAII guard for the start path. Acquires under one critical section that
+/// inspects tracked, starting, AND the kernel TCP table — closing every race
+/// against duplicate concurrent starts and against stop happening mid-init.
+/// Drop removes the key from `state.starting` on every exit path.
+struct StartReservation<'a> {
+    state: &'a AppState,
+    key: &'static str,
+}
+
+impl<'a> StartReservation<'a> {
+    fn try_acquire(svc: &'static KnownService, state: &'a AppState) -> Result<Self, String> {
+        // Lock both maps before doing anything else so a concurrent start
+        // observes either "already starting" or "already tracked".
+        let mut starting = state.starting.lock();
+        let tracked = state.tracked.lock();
+
+        if tracked.contains_key(svc.key) {
+            return Err(format!("{} is already running", svc.display));
+        }
+        if starting.contains(svc.key) {
+            return Err(format!("{} is already starting", svc.display));
+        }
+        // Drop tracked before we hit the kernel — `pid_on_port` is a syscall
+        // we don't need to hold the tracked lock for, and other readers of
+        // `state.tracked` (services_list) shouldn't be blocked on it.
+        drop(tracked);
+
+        if let Some(port) = svc.default_port {
+            if let Some(pid) = pid_on_port(port) {
+                return Err(format!(
+                    "Port {} is already bound by PID {}. Stop the other process first.",
+                    port, pid
+                ));
+            }
+        }
+
+        starting.insert(svc.key);
+        Ok(Self { state, key: svc.key })
+    }
+}
+
+impl<'a> Drop for StartReservation<'a> {
+    fn drop(&mut self) {
+        self.state.starting.lock().remove(self.key);
     }
 }
 
@@ -246,7 +313,20 @@ pub async fn services_list(state: State<'_, AppState>) -> Result<Vec<ServiceInfo
         }
     });
 
-    Ok(futures::future::join_all(probes).await)
+    let infos = futures::future::join_all(probes).await;
+
+    // Best-effort log reap for uninstalled services. Cheap (one read_dir +
+    // a HashSet lookup per file) and bundling it here means we never spawn
+    // a separate housekeeping task. Service keys are static, so we keep
+    // anything that's currently installed.
+    let keep_keys: Vec<&'static str> = infos
+        .iter()
+        .filter(|i| i.installed)
+        .filter_map(|i| known_services::lookup(&i.key).map(|s| s.key))
+        .collect();
+    service_logs::reap_orphans(keep_keys);
+
+    Ok(infos)
 }
 
 /// Implementation of `services_start` that takes a borrowed `AppState`.
@@ -275,21 +355,13 @@ pub(crate) async fn services_start_with_env(
         ));
     }
 
-    {
-        let tracked = state.tracked.lock();
-        if tracked.contains_key(svc.key) {
-            return Err(format!("{} is already running", svc.display));
-        }
-    }
-
-    if let Some(port) = svc.default_port {
-        if let Some(pid) = pid_on_port(port) {
-            return Err(format!(
-                "Port {} is already bound by PID {}. Stop the other process first.",
-                port, pid
-            ));
-        }
-    }
+    // Atomic reservation: tracked + starting are checked + mutated under the
+    // same critical section so two concurrent start calls for the same key
+    // can't both pass the duplicate check. The port check is also done in
+    // the same scope so a second-start can't slip between the port read and
+    // the reservation. `_reservation` releases the slot via Drop on every
+    // exit path.
+    let _reservation = StartReservation::try_acquire(svc, state)?;
 
     let cwd = known_services::working_dir(svc, &root);
     let args = known_services::launch_args(svc, &root);
@@ -472,6 +544,17 @@ pub async fn services_stop(
 ) -> Result<ServiceInfo, String> {
     let svc = known_services::lookup(&key).ok_or_else(|| format!("unknown service: {key}"))?;
 
+    // Refuse to stop a service that's currently mid-start. Otherwise we'd
+    // race with a half-spawned child (process exists but verify_started
+    // hasn't completed → not in tracked → we'd taskkill a process the
+    // start path is about to insert and report success on).
+    if state.starting.lock().contains(svc.key) {
+        return Err(format!(
+            "{} is still starting — wait for it to come up before stopping.",
+            svc.display
+        ));
+    }
+
     let (pid_to_kill, mutated) = {
         let mut tracked = state.tracked.lock();
         let swept = sweep_dead(&mut tracked);
@@ -516,10 +599,23 @@ pub async fn services_restart(
     key: String,
     state: State<'_, AppState>,
 ) -> Result<ServiceInfo, String> {
-    let _ = services_stop(key.clone(), state.clone()).await;
-    // Brief pause so OS releases the port before we rebind.
+    // Capture stop's error so we can surface it if the subsequent start
+    // also fails — otherwise the user only sees a confusing port-bound
+    // error from start without the upstream cause.
+    let stop_err = services_stop(key.clone(), state.clone()).await.err();
+
+    // Brief pause so the OS releases the port before we rebind.
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    services_start(key, state).await
+
+    match services_start(key, state).await {
+        Ok(info) => Ok(info),
+        Err(start_err) => match stop_err {
+            Some(stop_err) if !stop_err.contains("is not running") => Err(format!(
+                "Restart failed:\n  Stop step: {stop_err}\n  Start step: {start_err}"
+            )),
+            _ => Err(start_err),
+        },
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -596,14 +692,32 @@ pub fn services_config_read(path: String) -> Result<String, String> {
 pub fn services_config_write(path: String, content: String) -> Result<(), String> {
     validate_config_path(&path)?;
 
-    // Backup-on-save: previous contents go to <path>.bak. Best-effort —
-    // if the source doesn't exist (first write), skip without erroring.
+    // No-op short-circuit: if the file already matches the new contents,
+    // skip the write entirely. Avoids gratuitous mtime bumps + skips
+    // creating a duplicate backup of identical content.
     if let Ok(prev) = std::fs::read(&path) {
-        let bak = format!("{path}.bak");
-        let _ = std::fs::write(&bak, prev);
+        if prev == content.as_bytes() {
+            return Ok(());
+        }
+        write_rotating_backup(&path, &prev);
     }
 
     std::fs::write(&path, content).map_err(|e| format!("failed to write {path}: {e}"))
+}
+
+/// Backup-on-save with a tiny ring buffer: keep the latest three previous
+/// versions as `<path>.1.bak` (newest) → `<path>.3.bak`. The previous
+/// scheme of always writing `<path>.bak` lost a user's pre-edit version
+/// the moment they hit Save twice.
+fn write_rotating_backup(path: &str, prev: &[u8]) {
+    const KEEP: usize = 3;
+    // Slide existing backups one slot back, oldest first.
+    for i in (1..KEEP).rev() {
+        let from = format!("{path}.{i}.bak");
+        let to = format!("{path}.{}.bak", i + 1);
+        let _ = std::fs::rename(&from, &to);
+    }
+    let _ = std::fs::write(format!("{path}.1.bak"), prev);
 }
 
 /// Defense-in-depth for the config-write path. The frontend only writes to
@@ -711,8 +825,11 @@ pub fn services_open_data(key: String, app: AppHandle) -> Result<(), String> {
         .unwrap_or_else(|| install.clone());
 
     if !target.exists() {
+        // The install dir vanishing usually means the user uninstalled via
+        // `scoop uninstall` outside Stackpilot — point them at the fix
+        // instead of leaving them with a generic "not found".
         return Err(format!(
-            "{} install directory not found at {}.",
+            "{} install directory not found at {}. Reinstall it from Packages to recreate it.",
             svc.display,
             install.display()
         ));

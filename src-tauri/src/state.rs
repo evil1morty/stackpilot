@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use parking_lot::Mutex;
@@ -28,6 +28,12 @@ pub struct AppState {
     /// Tracked services Stackpilot has spawned. Persisted to disk so a
     /// crash + relaunch re-attaches to still-running children.
     pub tracked: Mutex<HashMap<String, TrackedService>>,
+    /// Service keys whose start sequence is mid-flight (init step, spawn,
+    /// post-spawn verify). Held under the same critical section as
+    /// `tracked` so a second start request can't race past the duplicate
+    /// check before the first call has registered itself. Also blocks
+    /// `services_stop` from racing with a half-started service.
+    pub starting: Mutex<HashSet<&'static str>>,
     /// Monotonic counter bumped by `scoop_cancel`. Multi-step orchestrators
     /// (e.g. `presets_apply`) snapshot it before starting and check before
     /// every step to detect that the user pressed Cancel.
@@ -66,6 +72,7 @@ impl AppState {
             catalog: CatalogCache::default(),
             running_pid: Mutex::new(None),
             tracked: Mutex::new(tracked),
+            starting: Mutex::new(HashSet::new()),
             cancellation_gen: AtomicU64::new(0),
             close_to_tray: AtomicBool::new(true),
         }

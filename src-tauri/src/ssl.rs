@@ -92,6 +92,38 @@ pub fn mint(host: &str) -> Result<CertPaths, String> {
     Ok(CertPaths { crt, key })
 }
 
+/// Best-effort cleanup of cert + key files for hosts no longer referenced
+/// by any project. Called after project mutations (delete / vhost remove)
+/// so the certs dir doesn't grow forever as users churn projects.
+pub fn reap_orphans(active_hosts: &std::collections::HashSet<String>) {
+    let dir = certs_dir();
+    let Ok(rd) = fs::read_dir(&dir) else { return };
+
+    // Files are named `<sanitized_host>.{crt,key}`. Compute the same sanitization
+    // used at mint() time and keep anything that round-trips.
+    let active_safe: std::collections::HashSet<String> = active_hosts
+        .iter()
+        .map(|h| {
+            h.chars()
+                .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+                .collect()
+        })
+        .collect();
+
+    for entry in rd.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        let stem = name
+            .strip_suffix(".crt")
+            .or_else(|| name.strip_suffix(".key"));
+        let Some(stem) = stem else { continue };
+        if !active_safe.contains(stem) {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

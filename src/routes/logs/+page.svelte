@@ -63,6 +63,10 @@
       try {
         const sinceSize = serviceLog?.sizeBytes;
         const next = await ipc.servicesTailLog(key, 500, sinceSize);
+        // The user may have switched sources while we were awaiting; if the
+        // effect was torn down, drop the response on the floor instead of
+        // clobbering the new source's state.
+        if (cancelled) return;
         // Backend returns lines:[] + matching size when nothing changed.
         if (sinceSize != null && next.sizeBytes === sinceSize && next.lines.length === 0) {
           return;
@@ -70,8 +74,10 @@
         serviceLog = next;
         serviceErr = null;
         await tick();
+        if (cancelled) return;
         if (logEl && pinToBottom) logEl.scrollTop = logEl.scrollHeight;
       } catch (e) {
+        if (cancelled) return;
         serviceErr = e instanceof Error ? e.message : String(e);
       }
     }
