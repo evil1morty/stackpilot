@@ -77,7 +77,7 @@ fn powershell_inline(script: &str) -> Command {
 /// RAII guard that reserves the single in-flight scoop slot and clears it on
 /// drop. Returned `None` means another op is already running (caller should
 /// reject).
-struct OpSlot<'a> {
+pub(crate) struct OpSlot<'a> {
     state: &'a AppState,
 }
 
@@ -86,7 +86,7 @@ impl<'a> OpSlot<'a> {
     /// already running. The slot stores a sentinel PID 0 until `drive` swaps
     /// in the real child PID after spawn — that's what closes the TOCTOU
     /// window two concurrent callers would otherwise race through.
-    fn try_acquire(state: &'a AppState) -> Option<Self> {
+    pub(crate) fn try_acquire(state: &'a AppState) -> Option<Self> {
         let mut guard = state.running_pid.lock();
         if guard.is_some() {
             return None;
@@ -102,9 +102,34 @@ impl<'a> Drop for OpSlot<'a> {
     }
 }
 
+/// Acquire an op slot or emit an Error event + return Err. Used by every
+/// scoop-touching command entry point.
+pub(crate) fn acquire_or_reject<'a>(
+    state: &'a AppState,
+    on_event: &Channel<ScoopEvent>,
+) -> Result<OpSlot<'a>, String> {
+    match OpSlot::try_acquire(state) {
+        Some(slot) => Ok(slot),
+        None => {
+            let msg = "another scoop operation is already running".to_string();
+            let _ = on_event.send(ScoopEvent::Error {
+                message: msg.clone(),
+            });
+            Err(msg)
+        }
+    }
+}
+
 /// Spawn a `Command`, wire stdout+stderr to a streaming `Channel`, and resolve
 /// once the child exits. Caller is responsible for any post-completion
 /// state mutation (cache refresh, etc.).
+///
+/// `running_pid` is expected to already hold the slot reservation (sentinel
+/// 0 from a held `OpSlot`). drive temporarily swaps it for the spawned
+/// child's PID so `scoop_cancel` can taskkill the right process, then
+/// restores the prior value (sentinel) on completion. Restoring rather than
+/// clearing matters for multi-step orchestrators (presets_apply) that hold
+/// one slot across several drives.
 pub(crate) async fn drive(
     mut cmd: Command,
     on_event: &Channel<ScoopEvent>,
@@ -121,6 +146,8 @@ pub(crate) async fn drive(
         command: label.to_string(),
     });
 
+    let prev_slot = *state.running_pid.lock();
+
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let pid = child.id();
 
@@ -131,14 +158,14 @@ pub(crate) async fn drive(
     let stdout = match child.stdout.take() {
         Some(s) => s,
         None => {
-            *state.running_pid.lock() = None;
+            *state.running_pid.lock() = prev_slot;
             return Err("failed to capture stdout".into());
         }
     };
     let stderr = match child.stderr.take() {
         Some(s) => s,
         None => {
-            *state.running_pid.lock() = None;
+            *state.running_pid.lock() = prev_slot;
             return Err("failed to capture stderr".into());
         }
     };
@@ -163,7 +190,9 @@ pub(crate) async fn drive(
     let wait_result = match tokio::time::timeout(SUBPROCESS_TIMEOUT, wait).await {
         Ok(r) => r,
         Err(_) => {
-            // Timeout: kill the child so the slot is freed; surface to UI.
+            // Timeout: kill the child so it can't keep filling pipes; restore
+            // the prior slot (sentinel) so the OpSlot guard still controls
+            // overall release.
             if let Some(pid) = pid {
                 kill_pid(pid).await;
             }
@@ -173,14 +202,14 @@ pub(crate) async fn drive(
                     SUBPROCESS_TIMEOUT.as_secs() / 60
                 ),
             });
-            *state.running_pid.lock() = None;
+            *state.running_pid.lock() = prev_slot;
             return Err("scoop subprocess timed out".into());
         }
     };
     let _ = stdout_task.await;
     let _ = stderr_task.await;
 
-    *state.running_pid.lock() = None;
+    *state.running_pid.lock() = prev_slot;
 
     let status = wait_result.map_err(|e| e.to_string())?;
     Ok(status.code().unwrap_or(-1))
@@ -216,24 +245,6 @@ fn validate_app_ref(app: &str) -> Result<(), String> {
         return Err(format!("invalid app name: {app:?}"));
     }
     Ok(())
-}
-
-/// Reject "another op running" + emit Error event. Used by every command
-/// entry point to keep the rejection path uniform.
-fn reject_if_busy<'a>(
-    state: &'a AppState,
-    on_event: &Channel<ScoopEvent>,
-) -> Result<OpSlot<'a>, String> {
-    match OpSlot::try_acquire(state) {
-        Some(slot) => Ok(slot),
-        None => {
-            let msg = "another scoop operation is already running".to_string();
-            let _ = on_event.send(ScoopEvent::Error {
-                message: msg.clone(),
-            });
-            Err(msg)
-        }
-    }
 }
 
 /// Shared body for install / update / uninstall.
@@ -275,7 +286,7 @@ pub async fn scoop_install(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let _slot = reject_if_busy(&state, &on_event)?;
+    let _slot = acquire_or_reject(&state, &on_event)?;
     run_scoop_app_op("install", &app, &on_event, &state).await
 }
 
@@ -285,7 +296,7 @@ pub async fn scoop_update(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let _slot = reject_if_busy(&state, &on_event)?;
+    let _slot = acquire_or_reject(&state, &on_event)?;
     run_scoop_app_op("update", &app, &on_event, &state).await
 }
 
@@ -295,7 +306,7 @@ pub async fn scoop_uninstall(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let _slot = reject_if_busy(&state, &on_event)?;
+    let _slot = acquire_or_reject(&state, &on_event)?;
     run_scoop_app_op("uninstall", &app, &on_event, &state).await
 }
 
@@ -304,7 +315,7 @@ pub async fn scoop_bootstrap(
     on_event: Channel<ScoopEvent>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let _slot = reject_if_busy(&state, &on_event)?;
+    let _slot = acquire_or_reject(&state, &on_event)?;
 
     // The official one-liner. -Force on Set-ExecutionPolicy keeps it from
     // prompting the user when the policy is already RemoteSigned.
@@ -322,18 +333,25 @@ pub async fn scoop_bootstrap(
 /// so PowerShell + scoop subprocesses are killed too. Returns true if a
 /// process was cancelled. Bumps cancellation_gen so multi-step orchestrations
 /// (preset apply) can detect that they should abort.
+///
+/// We deliberately do NOT clear `running_pid` here — that's the slot
+/// reservation owned by the current OpSlot. Letting it linger means a
+/// concurrent acquire can't slip in between this kill and the in-flight
+/// op's natural unwind. drive() restores the prior sentinel when its child
+/// exits; OpSlot::drop releases for real on the outer scope.
 #[tauri::command]
 pub async fn scoop_cancel(state: State<'_, AppState>) -> Result<bool, String> {
     state
         .cancellation_gen
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
-    let pid = { state.running_pid.lock().take() };
+    let pid = { *state.running_pid.lock() };
     let Some(pid) = pid else {
         return Ok(false);
     };
-    // Sentinel slot reservation (PID 0) means a slot is held but no child has
-    // spawned yet — nothing to kill, just release.
+    // Sentinel slot reservation (PID 0): a slot is held but no child has
+    // spawned yet — nothing to kill. The cancellation_gen bump will be
+    // observed by the orchestrator on its next step.
     if pid == 0 {
         return Ok(true);
     }

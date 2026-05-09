@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use tauri::State;
 
-use crate::commands::scoop_ops::{drive, scoop_powershell, ScoopEvent};
+use crate::commands::scoop_ops::{acquire_or_reject, drive, scoop_powershell, ScoopEvent};
 use crate::commands::services;
 use crate::known_services;
 use crate::presets::{self, Preset};
@@ -111,13 +111,11 @@ pub async fn presets_apply(
 ) -> Result<(), String> {
     let p = presets::lookup(&key).ok_or_else(|| format!("unknown preset: {key}"))?;
 
-    if state.running_pid.lock().is_some() {
-        let msg = "another scoop operation is already running".to_string();
-        let _ = on_event.send(ScoopEvent::Error {
-            message: msg.clone(),
-        });
-        return Err(msg);
-    }
+    // Hold one slot for the entire preset apply. Each inner `drive` call
+    // temporarily swaps the spawned PID into running_pid for cancel
+    // targeting, then restores the sentinel — releasing the slot only when
+    // _slot drops at function exit.
+    let _slot = acquire_or_reject(&state, &on_event)?;
 
     let _ = on_event.send(ScoopEvent::Started {
         command: format!("preset {} → {}", p.key, p.name),
