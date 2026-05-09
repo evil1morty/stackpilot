@@ -136,8 +136,6 @@
       <h1>Packages</h1>
       <p class="lede">
         {#if stats}
-          {stats.total.toLocaleString()} apps
-          <span class="dot-sep">·</span>
           <button
             class="stat-link"
             class:active={installedOnly}
@@ -146,8 +144,6 @@
           >
             {stats.installed} installed
           </button>
-          <span class="dot-sep">·</span>
-          {stats.buckets.length} buckets
         {:else if loading}
           Loading…
         {:else}
